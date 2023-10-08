@@ -1,0 +1,184 @@
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º CALL:     1) GUS_Init     --> Initialize the Gravis Ultrasound driver.      º
+;º	     2) GUS_GetSpl   --> Called after loading each sample.	       º
+;º           3) GUS_Start    --> Start playing the module or sample(s).        º
+;º           4) GUS_Remove   --> Uninitialize the Gravis Ultrasound driver.    º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GUS_Driver      Segment Para Private Use16 'CODE'
+                Assume  CS:GUS_Driver, DS:Nothing, ES:Nothing
+
+	.386
+
+	BPtr	EQU Byte Ptr
+	WPtr	EQU Word Ptr
+	DPtr	EQU Dword Ptr
+
+PUBLIC	GUS_Init, GUS_GetSpl, GUS_Start, GUS_Output, GUS_Remove
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º     ú   .	   ÜÛÛÛÛ ÛÛ  ÛÛ ÜÛÛÛÛ	.    ÛÛ ÛÛÛÛÛÜ ÛÛ ÛÛÛÛÛÛß  .	     ú º
+;º		.  ÛÛ	 ÛÛ  ÛÛ ÛÛ	   . ÛÛ ÛÛ  ÛÛ ÛÛ   ÛÛ	       .       º
+;º	ù	   ÛÛ ÛÛ ÛÛ  ÛÛ ÛÛÛÛÛ  .     ÛÛ ÛÛ  ÛÛ ÛÛ   ÛÛ	 ú	   .   º
+;º  ú	      ú    ÛÛ  Û ÛÛ  ÛÛ    ÛÛ	     ÛÛ ÛÛ  ÛÛ ÛÛ . ÛÛ	    ú	       º
+;º	  .	   ÛÛÛÛÛ ÛÛÛÛÛß ÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ ÛÛ  ÛÛ ÛÛ   ÛÛ	.	ù      º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the GUS_Init function:			       º
+;º									       º
+;º		DS = Segment of the  following info blocks;  usually the       º
+;º		     data or code segment of the frontend program.	       º
+;º									       º
+;º		SI = Pointer to the Device Info block.	Unneeded entries       º
+;º		     should be set to zero;  if some entry is set to -1,       º
+;º		     the value will be auto-detected by the SoundSystem.       º
+;º		     0 - Device number (5 = Gravis Ultrasound). 	       º
+;º		     2 - Base Address for the device.			       º
+;º		     4 - IRQ line for the device.			       º
+;º		     6 - DMA channel for the device.			       º
+;º									       º
+;º		DI = Pointer to the Playing Info block;  format follows:       º
+;º		     0 - Playing Mode (0 = AutoPlay, 1 = CallPlay).	       º
+;º		     2 - Calling Frequency in Hz (for CallPlay mode).	       º
+;º		     4 - Mixing Frequency in Hz (not needed for GUS).	       º
+;º		     6 - PT/NT Tempo Mode (0 = PT-mode, 1 = NT-mode).	       º
+;º		     8 - Octave Mode (0 = 3 octaves, 1 = 5 octaves).	       º
+;º		    10 - Module Type (-1 if not specified).		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GUS_Init	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs		; Save the segment regs.
+	mov	ax, ds			; AX = Seg addr of the info blocks.
+	mov	fs, ax			; Set FS to point the info blocks.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+
+GetPlayMode:
+	mov	ax, fs:[di]		; Fetch the playing mode.
+	mov	PlayMode, ax		; Save the playing mode word.
+
+GetCallFreq:
+	mov	ax, fs:[di+2]		; Get the effect command frequency.
+	mov	CallFreq, ax		; Store the command update frequency.
+
+GetBaseAddr:
+	mov	ax, fs:[si+2]		; Fetch the GUS's Base Address.
+	mov	BaseAddr, ax		; Store the Base Address.
+
+AllDone:
+	pop	fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	ret				; Return.
+
+GUS_Init	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º	 . ÜÛÛÛÛ ÛÛ  ÛÛ ÜÛÛÛÛ  ú     ÜÛÛÛÛ ÛÛÛÛÛÛß ÜÛÛÜ  ÜÛÛÛÛÜ ÛÛÛÛÛÛß   ú    º
+;º  .	   ÛÛ	 ÛÛ  ÛÛ ÛÛ	   . ÛÛ      ÛÛ   ÛÛ  ÛÛ ÛÛ  ÛÛ   ÛÛ	     ù º
+;º	   ÛÛ ÛÛ ÛÛ  ÛÛ ÛÛÛÛÛ	ù    ÛÛÛÛÛ ú ÛÛ ú ÛÛÜÜÛÛ ÛÛÛÛÛß ú ÛÛ ú	  ù    º
+;º	.  ÛÛ  Û ÛÛ  ÛÛ    ÛÛ	  ú	ÛÛ   ÛÛ   ÛÛ  ÛÛ ÛÛ  Ûİ   ÛÛ	       º
+;º  ú	   ÛÛÛÛÛ ÛÛÛÛÛß ÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛ   ÛÛ  úÛÛ  ÛÛ ÛÛ úŞÛ   ÛÛ  ù   ú    º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the GUS_Start function:			       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GUS_Start	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs gs		; Save the segment regs.
+	pop	gs fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	ret				; Return.
+
+GUS_Start	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º    ú  ÜÛÛÛÛ ÛÛ  ÛÛ ÜÛÛÛÛ   ú    ÜÛÛÛÛ ÜÛÛÛÛ ÛÛÛÛÛÛß ÜÛÛÛÛ ÜÛÛÛÛÜ ÜÛ	    ú  º
+;º  .	 ÛÛ    ÛÛ  ÛÛ ÛÛ	 . ÛÛ	 ÛÛ	 ÛÛ    ÛÛ    ÛÛ  ÛÛ ÛÛ	ù      º
+;º	 ÛÛ ÛÛ ÛÛ  ÛÛ ÛÛÛÛÛ ú  ù   ÛÛ ÛÛ ÛÛÛÛ ú  ÛÛ ú  ÛÛÛÛÛ ÛÛÛÛÛß ÛÛ	  ú    º
+;º     ú ÛÛ  Û ÛÛ  ÛÛ	 ÛÛ	   ÛÛ  Û ÛÛ	 ÛÛ	  ÛÛ ÛÛ    úÛÛ	   .   º
+;º  ú	 ÛÛÛÛÛ ÛÛÛÛÛß ÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛ ÛÛÛÛÛ	 ÛÛ  ú ÛÛÛÛÛ ÛÛ  ù  ÛÛÛÛÜ      º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the GUS_GetSpl function: 		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GUS_GetSpl	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs gs		; Save the segment regs.
+	pop	gs fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	ret				; Return.
+
+GUS_GetSpl	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º     ÜÛÛÛÛ ÛÛ  ÛÛ ÜÛÛÛÛ ú   .  ÜÛÛÛÛÜ ÛÛ  ÛÛ ÛÛÛÛÛÛß ÜÛÛÛÛÜ ÛÛ  ÛÛ ÛÛÛÛÛÛß . º
+;º  ú  ÛÛ    ÛÛ  ÛÛ ÛÛ		 ÛÛ  ÛÛ ÛÛ  ÛÛ	.ÛÛ  . ÛÛ  ÛÛ ÛÛ  ÛÛ   ÛÛ      º
+;º     ÛÛ ÛÛ ÛÛ  ÛÛ ÛÛÛÛÛ   ù	 ÛÛ  ÛÛ ÛÛ  ÛÛ	 ÛÛ    ÛÛÛÛÛß ÛÛ  ÛÛ   ÛÛ ù    º
+;º   ù ÛÛ  Û ÛÛ  ÛÛ    ÛÛ      ú ÛÛ  ÛÛ ÛÛ  ÛÛ . ÛÛ ú  ÛÛ     ÛÛ  ÛÛ   ÛÛ   ú  º
+;º ú   ÛÛÛÛÛ ÛÛÛÛÛß ÛÛÛÛÛ ÛÛÛÛÛÛ ßÛÛÛÛß ÛÛÛÛÛß	 ÛÛ    ÛÛ  ù  ÛÛÛÛÛß   ÛÛ  ú   º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the GUS_Output function: 		       º
+;º									       º
+;º		FS = Segment where the	Channel Info blocks are located;       º
+;º		     usually SEG SoundSys.				       º
+;º									       º
+;º		SI = Offset of the first  Channel Info block.  The block       º
+;º		     structure is defined in the main Sound System. Each       º
+;º		     entry of the table is referred to like fs:[si+equ],       º
+;º		     where 'equ' is an offset  from the beginning of the       º
+;º		     array. The needed equates are defined at the end of       º
+;º		     the device drivers.				       º
+;º									       º
+;º		BP = Length of a Channel Info block in bytes.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GUS_Output	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs gs		; Save the segment regs.
+	pop	gs fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	ret				; Return.
+
+GUS_Output	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º    ÜÛÛÛÛ ÛÛ	ÛÛ ÜÛÛÛÛ      ú ÜÛÛÛÛÜ ÜÛÛÛÛ ÛÛÛÛÛÛÛÛÛÜ ÜÛÛÛÛÜŞÛú   ÛİÜÛÛÛÛ    º
+;º    ÛÛ    ÛÛ	ÛÛ ÛÛ	  ú	ÛÛ  ÛÛ ÛÛ  ú ÛÛ  ÛÛ  ÛÛ ÛÛ  ÛÛ Ûİ .ŞÛ ÛÛ    ú  º
+;º    ÛÛ ÛÛ ÛÛ	ÛÛ ÛÛÛÛÛ    ú	ÛÛÛÛÛß ÛÛÛÛ  ÛÛ  ÛÛ  ÛÛ ÛÛ  ÛÛ ŞÛ  Ûİ ÛÛÛÛ     º
+;º ú  ÛÛ  Û ÛÛ	ÛÛ    ÛÛ	ÛÛ  Ûİ ÛÛ    ÛÛù ÛÛ  ÛÛ ÛÛ  ÛÛ	ÛİŞÛ  ÛÛ   ú   º
+;º    ÛÛÛÛÛ ÛÛÛÛÛß ÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ úŞÛ ÛÛÛÛÛ ÛÛ  ÛÛ  ÛÛ ßÛÛÛÛß úŞÛÛİ  ÛÛÛÛÛ    º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	No parameters required for the GUS_Remove procedure.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GUS_Remove	Proc	Far
+
+	cli				; Disable interrupts.
+	pushad				; Save all 32-bit regs.
+	push	ds			; Save the data segment.
+	pop	ds			; Restore the data segment.
+	popad				; Restore all 32-bit regs.
+	sti				; Enable interrupts again.
+	ret				; Return.
+
+GUS_Remove	EndP
+;±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±
+;±±									      ±±
+;±±			   T H E   D A T A   A R E A			      ±±
+;±±									      ±±
+;±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±
+OldInt8 	Label	Dword
+Int8Offs	DW	0
+Int8Seg 	DW	0
+
+PlayingInfo	Label	Word
+PlayMode	DW	0
+CallFreq	DW	50
+PlayFreq	DW	0
+TempoMode	DW	0
+OctaveMode	DW	0
+ModuleType	DW	0
+
+DeviceInfo	Label	Word
+BaseAddr	DW	220h
+IRQ		DW	5
+DMA		DW	5
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+GUS_Driver      EndS
+
+		End
+

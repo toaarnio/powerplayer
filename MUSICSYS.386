@@ -1,0 +1,1317 @@
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º .	    ú			.      THE			    ù	       º
+;º		     .				      . 		       º
+;º  ßßßß ßßÛßÛ ßßßß   ßßÛßÛ ß  Û ßßßß ß ßßßß . ßßßß ß  Û ßßßß ßßßß ßßßß ßßÛßÛ  º
+;º  Ûßß  Û Û Û Ûßß    Û Û Û Û  Û ßßßÛ Û Û      ßßßÛ ßßÛß ßßßÛ . Û  Ûßß	Û Û Û  º
+;º  ßßßß ß ß ß ß   .  ß ß ß ßßßß ßßßß ß ßßßß   ßßßß   ß  ßßßß	ß  ßßßß ß ß ß  º
+;º .				   ù		    .			    ú  º
+;º    CODED BY SKYRIDER, DEVASTATOR AND SARACEN OF THE ELECTROMOTIVE FORCE     º
+;º   .		   ú			     ù		   .		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MusicSys	Segment Para Use16 'CODE'
+		Assume	CS:MusicSys, DS:MusicSys, ES:Nothing
+
+
+	IFDEF	PP_MODE
+
+		include \asm\pphelp.txt
+
+	ELSE
+
+		DB	2001 DUP (0)
+
+	ENDIF
+
+	Org	2001d			; Reserve space for mix buffers.
+
+	.386
+
+	BPtr	EQU Byte Ptr
+	WPtr	EQU Word Ptr
+	DPtr	EQU Dword Ptr
+
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AH = The function:					       º
+;º									       º
+;º		     0 = Start playing. 				       º
+;º		     1 = Mix only (called in every retrace when in call-mode). º
+;º		     2 = Stop playing (always called last).		       º
+;º		     3 = Set master volume to DL [0..64].		       º
+;º		     4 = Switch playing mode to BP (playing continues).        º
+;º		     5 = RFU (Reserved for Future Use). 		       º
+;º		     6 = RFU (Reserved for Future Use). 		       º
+;º		     7 = Initialize the Sound Blaster (always called first).   º
+;º									       º
+;º		AL = The output device: (Must be set for all functions!)       º
+;º									       º
+;º		     0 = Covox in LPT1. 				       º
+;º		     1 = Covox in LPT2. 				       º
+;º		     2 = Sound Blaster. 				       º
+;º		 Other = No Sound.					       º
+;º									       º
+;º		Parameters for function #0:				       º
+;º									       º
+;º		    BX = The playing frequency in Hertz.		       º
+;º		    CL = PT/NT tempo mode (0 = PT-mode, 1 = NT-mode).	       º
+;º		    CH = Amiga/PC octave mode (0 = 3 octaves, 1 = 5 octaves).  º
+;º		    DL = The module type (FFh if not specified).	       º
+;º		    DH = The IRQ number of the SoundBlaster.		       º
+;º		    DI = The frequency of the vertical retrace in Hertz.       º
+;º		    BP = The mode of play: 0 = Auto-play, 1 = Call-mixing.     º
+;º		    ES = The segment of the module file to be played.	       º
+;º									       º
+;º RETURNS:	Function #0 returns CF = 1 and AX = error code if	       º
+;º		error occurred during initialization. Error codes:	       º
+;º		1 = module type not supported by the playing routine.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MusicSystem	Proc	Far
+
+	cmp	al, 2				; Device number out of range?
+	jbe	$+3				; Proceed if valid number.
+	retf					; Else return.
+
+	pushad					; Save all 32-bit registers.
+	push	es				; Save the ES.
+	push	ds				; Save the DS.
+	mov	si, cs				; Set the DS to point...
+	mov	ds, si				; ...to the code segment.
+	movzx	esi, ah 			; Set ESI = Command number.
+	movzx	ebp, bp 			; Sign-extend the BP into EBP.
+	call	Functions[esi*2]		; Call the correct function.
+	pop	ds				; Restore the DS.
+	pop	es				; Restore the ES.
+	popad					; Restore all 32-bit registers.
+	mov	ax, cs:ErrNum			; Fetch the error number.
+	retf					; Return.
+
+MusicSystem	EndP
+;ÕÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍ¸
+;³			   THE MUSIC SYSTEM FUNCTIONS:			       ³
+;ÔÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍ¾
+StartPlaying	Proc	Near
+
+	mov	TempoMode, cl			; Save the tempo override flag.
+	mov	FiveOctaves, ch 		; Store the octave mode flag.
+	movzx	cx, dh				; Make the IRQ # word sized.
+	mov	SbIrqNumber, cx 		; Save the SB's IRQ number.
+	mov	Device, al			; Save the playing device.
+	mov	cx, dx				; Store the module type in CL.
+
+	mov	eax, 1000000			; Initialize EAX for division.
+	xor	edx, edx			; Zero the upper doubleword.
+	movzx	ebx, bx 			; Initialize the divisor.
+	div	ebx				; EAX = 1'000'000 Hz / PlayFreq
+	mov	ebx, eax			; Copy the result in the EBX.
+	mov	eax, 1000000			; Set EAX for another division.
+	xor	edx, edx			; And zero the upper dword.
+	div	ebx				; Now AX = The real PlayFreq.
+	mov	PlayFreq, ax			; Store the final PlayFreq.
+
+	mov	ScreenHertz, di 		; Save the retrace frequency.
+	mov	ModuleSegment, es		; Save the module's segment.
+	movzx	ebx, cl 			; Copy the module type to EBX.
+	call	InitModule			; Parse the module header.
+	jc	UnSupportedType 		; Jump if type not supported.
+	mov	dl, 2				; Default: 4-channel module.
+	cmp	ModuleType, 3			; Is this an FLT8-module?
+	jne	$+4				; Skip next instruction if yes.
+	inc	dl				; Set the 8-channel shift value.
+	call	MakeVolTable			; Make the volume table.
+	movzx	esi, Device			; Set ESI = The device number.
+	jmp	DeviceHandlers[esi*2]		; Initialize the correct device.
+
+UnSupportedType:
+	mov	ErrNum, 1			; Set the error number.
+	ret					; Return to the main handler.
+
+;		   ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Initialize and set the Sound Blaster ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		   ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SbHandler:
+	mov	cx, SbIrqNumber 		; Fetch the SB's IRQ number.
+	xor	ax, ax				; Request enable an IRQ.
+	call	IrqMasker			; Call the IRQ mask handler.
+	mov	cx, SbIrqNumber 		; Fetch the SB's IRQ number.
+	add	cx, 8				; Add the INT vector base offs.
+	call	GetIntVector			; Fetch the old SB int vector.
+	mov	OldSbInt, eax			; Save the old SB int vector.
+	mov	eax, ds:SbIrqHandlers[ebp*4]	; Fetch the IRQ handler address.
+	mov	cx, SbIrqNumber 		; Fetch the SB's IRQ number.
+	add	cx, 8				; Add the INT vector base offs.
+	call	SetIntVector			; Hook the SB int vector.
+        call    ForceIrq                        ; Force the starting IRQ.
+	clc					; Clear the Carry flag.
+	ret					; Return.
+;		     ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Initialize and set the Covox DAC ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		     ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+CovoxHandler:
+	mov	ax, PlayFreq			; Fetch the playing frequency.
+	shl	eax, 16 			; Shift it to the upper word.
+	xor	edx, edx			; Clear the upper doubleword.
+	mov	ebx, 18 SHL 16 + 65536/5	; Set the divisor (÷ 18.2 Hz).
+	div	ebx				; Divide to get BIOS time cntr.
+	mov	TimeCntr, ax			; Store the calculated counter.
+	mov	TimeCntrOrg, ax 		; Store a backup copy of it.
+	movzx	ax, Device			; Fetch the device number.
+	call	FetchCovoxAddr			; Fetch the Covox's port number.
+	mov	WPtr Port1+1, ax		; Save it in the INT handler #1.
+	IFNDEF	PP_MODE
+	mov	WPtr Port2+1, ax		; Save it in the INT handler #2.
+	ENDIF
+	xor	ax, ax				; Request enable an IRQ.
+	mov	cx, ax				; Set CX = Timer's IRQ number.
+	call	IrqMasker			; Call the IRQ mask handler.
+	mov	cx, 8				; Set CX = Timer's INT number.
+	call	GetIntVector			; Get the old timer int vector.
+	mov	OldInt08, eax			; Save the old timer int vector.
+	mov	eax, ds:CvxIrqHandlers[ebp*4]	; Fetch the IRQ handler address.
+	mov	cx, 8				; Set CX = Timer's INT number.
+	call	SetIntVector			; Hook the timer int vector.
+	mov	bx, PlayFreq			; Request set tmr to playfreq.
+	call	SetTimerFreq			; Set the timer chip frequency.
+	clc					; Clear the Carry flag.
+	ret					; Return.
+
+StartPlaying	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º			  THE RETRACE MIXING HANDLER			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+RetraceMix	Proc	Near
+
+	IFNDEF	PP_MODE
+
+	mov	cx, NextToMix			; Fetch number of buff to fill.
+	mov	ax, FreeBuffer			; Fetch the free buf number.
+	cmp	ax, cx				; Referencing the same buffer?
+	jne	NoMix				; No mixing if not.
+	mov	bx, 500 			; Point the end of first buffer.
+	shl	bx, cl				; Multiply by two when needed.
+	add	bx, MixBufReloc 		; Relocate the mix buffer.
+	mov	cx, MixCount			; Fetch the mixing byte count.
+	call	MixerParser			; Mix the bytes.
+	xor	NextToMix, 1			; Flip the buffer pointer.
+NoMix:	ret					; Return.
+
+	ENDIF
+
+RetraceMix	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º			     THE END PLAY HANDLER			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+EndPlaying	Proc	Near
+
+	cmp	Device, 2			; Sound Blaster?
+	jne	NotSB				; Test for other devices if not.
+;		 ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Un-initialize and reset the Sound Blaster ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		 ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+	mov	dx, SbBaseIOAddr		; Fetch the SB's base I/O addr.
+	call	InitializeSoundBlaster		; Initialize the Sound Blaster.
+	mov	dx, SbBaseIOAddr		; Fetch the SB's base I/O addr.
+	add	dx, 0Ch 			; Point the SB command port.
+	mov	al, 0D3h			; Set a command byte in the AL.
+	out	dx, al				; Turn the speaker OFF.
+	mov	cx, SbIrqNumber 		; Fetch the SB's IRQ number.
+	mov	ax, 1				; Request disable an IRQ.
+	call	IrqMasker			; Call the IRQ mask handler.
+	mov	eax, OldSbInt			; Fetch the old SB INT vector.
+	mov	cx, SbIrqNumber 		; Fetch the SB's IRQ number.
+	add	cx, 8				; Add the INT vector base offs.
+	call	SetIntVector			; Release the SB int vector.
+	ret					; Return.
+;		   ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Un-initialize and reset the Covox DAC ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		   ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+NotSB:
+	xor	bx, bx				; Request normalize the timer.
+	call	SetTimerFreq			; Set the timer chip frequency.
+	mov	eax, OldInt08			; Fetch the old INT 08h vector.
+	mov	cx, 8				; Set CX = Timer's INT number.
+	call	SetIntVector			; Release the timer int vector.
+	ret					; Return.
+
+EndPlaying	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º		       THE MASTER VOLUME SETTING ROUTINE		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SetMstrVol	Proc	Near
+
+	IFNDEF	PP_MODE
+
+	cmp	dl, 64				; Volume request too great?
+	ja	TooBig				; Exit if yes.
+	mov	dh, 64				; Calculate the value used by
+	sub	dh, dl				;  the playing routines.
+	mov	MasterVolume, dh		; Set the master volume.
+TooBig: ret					; Return.
+
+	ENDIF
+
+SetMstrVol	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º		       THE PLAYING MODE SWITCHING ROUTINE		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SwitchPlayMode	Proc	Near
+
+	IFNDEF	PP_MODE
+
+	mov	eax, ds:SbIrqHandlers[ebp*4]	; Fetch the IRQ handler address.
+	mov	cx, SbIrqNumber 		; Fetch the SB's IRQ number.
+	add	cx, 8				; Add the INT vector base offs.
+	cmp	Device, 2			; Sound Blaster?
+	je	SwitchMode			; Go set the vector now if yes.
+	mov	eax, ds:CvxIrqHandlers[ebp*4]	; Fetch the IRQ handler address.
+	mov	cx, 8				; Set CX = Timer's INT number.
+SwitchMode:
+	call	SetIntVector			; Hook the correct int vector.
+	ret					; Return.
+
+	ENDIF
+
+SwitchPlayMode	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º		    THE SOUND BLASTER INITIALIZATION ROUTINE		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+InitSB	Proc	Near
+
+	cmp	al, 2				; Device = Sound Blaster?
+	jne	NoInit				; No initialization if not.
+	call	DetectSB			; Detect the SB's base I/O addr.
+	mov	SbBaseIOAddr, dx		; Save the SB's base I/O addr.
+	call	InitializeSoundBlaster		; Initialize the Sound Blaster.
+NoInit: ret					; Return.
+
+InitSB	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	EBX = The module type (FFh if not specified).		       º
+;º RETURNS:	CF = 1 if module type not supported.			       º
+;º FUNCTION:	Initializes the module and some variables for playing.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+InitModule	Proc	Near
+
+	pusha					; Save all registers.
+	push	es				; Save the ES.
+	mov	es, ModuleSegment		; Set ES to point the module.
+	cmp	bx, 0FFh			; Is the module type specified?
+	jne	SkipModDetect			; Skip the detection if yes.
+	call	DetectModType			; Detect the module type.
+SkipModDetect:
+	mov	ModuleType, bl			; Store the module type.
+	call	Initializers[ebx*2]		; Initialize the module.
+	mov	ax, BaseOrder			; Fetch the order base pointer.
+	mov	NextOrder, ax			; Initialize the order pointer.
+	mov	ax, PatBaseSegment		; Fetch the pattern base seg.
+	mov	RowSegment, ax			; Initialize the row segment.
+	mov	PatternRow, 1			; Set the rows-to-go counter.
+;		       ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Calculate the command counter ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		       ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+	mov	bx, 50				; Tick freq. by default = 50Hz.
+	mov	ax, PlayFreq			; Playing Frequency in AX.
+	xor	dx, dx				; Zero DX before division.
+	div	bx				; Now AX = Command Counter.
+	mov	SlideCounter, ax		; Save the resulting counter.
+	mov	SlideOrg, ax			; Save a backup copy of it.
+;	ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄ¶ Calculate the number of bytes mixed in every vertical retrace ÇÄÄÄÄÄÄÄ
+;	ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+	xor	dx, dx				; Clear the DX.
+	mov	ax, PlayFreq			; Fetch the playing frequency.
+	div	ScreenHertz			; Divide it by the retrace freq.
+	add	ax, 10				; Add 10 extra bytes.
+	and	ax, 0FFFCh			; Count is now dividable by 4.
+	mov	MixCount, ax			; Save the retrace mixing count.
+	cmp	FiveOctaves, 1			; Five octaves instead of three?
+	jne	QuitInit			; No new slide limits if not.
+	mov	MinPeriod, 54			; Set the lowest poss. period.
+	mov	MaxPeriod, 1788 		; Set the highest poss. period.
+QuitInit:					; Quit the initialization.
+	pop	es				; Restore the ES register.
+	popa					; Restore all registers.
+	clc					; Clear the carry flag.
+	ret					; Return.
+
+InitModule	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES = Segment of the module.				       º
+;º RETURNS:	EBX = Module type.					       º
+;º		CF = 1 if module type not supported.			       º
+;º FUNCTION:	Detects the module type and sets some variables.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DetectModType	Proc	Near
+
+	mov	di, 1080			; DI = Offset of MOD signature.
+	cmp	DPtr es:[di], '.K.M'		; Is the M.K. sign there?
+	je	ItIsMOD 			; Jump to MOD init if yes.
+	cmp	DPtr es:[di], '!K!M'		; Is this a PT2.2 100-patt MOD?
+	je	ItIsMOD 			; Jump to MOD init if yes.
+	cmp	DPtr es:[di], '4TLF'		; Is the FLT4 sign there?
+	je	ItIsMOD 			; Jump to MOD init if yes.
+	cmp	DPtr es:[di], '8TLF'		; Is the FLT8 sign there?
+	je	ItIsMOD8			; Jump to 8-chan. init if yes.
+	cmp	DPtr es:[di], 'ATCO'		; Is the OCTA sign there?
+	je	ItIsMOD8			; If so, it's OctaComposer MOD.
+	cmp	DPtr es:[di], 'NHC8'		; Is the 8CHN sign there?
+	je	ItIsMOD8			; If so, it's FastTracker MOD.
+	cmp	WPtr es:[28], 021Ah		; Is this an STM module?
+	jne	ItIsOldMOD			; If not, it's a 15-instr. MOD.
+	xor	ebx, ebx			; Module type=0: STM.
+	ret					; Return to the initializer.
+ItIsMOD:
+	mov	ebx, 1				; Module type=1: Normal MOD.
+	ret					; Return to the initializer.
+ItIsOldMOD:
+	mov	ebx, 2				; Module type=2: Old MOD.
+	ret					; Return to the initializer.
+ItIsMOD8:
+	mov	ebx, 3				; Module type=3: 8-channel MOD.
+	ret					; Return to the initializer.
+
+DetectModType	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º		THE MODULE TYPE DEPENDENT INITIALIZATION ROUTINES	       º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º Information about all initializers in general:			       º
+;º									       º
+;º INPUT:	SI = The request flag.					       º
+;º RETURNS:	CF = 1 if the module type is not supported by the musicsystem. º
+;º FUNCTION:	These routines do some module type dependent initialization.   º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+
+;		    ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ The 15-instrument MOD initialization ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		    ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MOD15Init	Proc	Near
+
+	mov	PatBaseSegment, 25h		; No signature found, so this
+	mov	PatBaseOffs, 08h		;  must be some old module with
+	mov	BaseOrder, 1D8h 		;  only 15 instruments.
+	mov	cx, 15				; Set # of instruments in CX.
+	jmp	ContModInit			; Continue the initialization.
+
+MOD15Init	EndP
+;		ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ The 8-channel StarTrekker MOD initialization ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MOD8Init	Proc	Near
+
+	mov	PatBaseSegment, 43h		; Set the pattern base segment.
+	mov	PatBaseOffs, 0Ch		; Set the pattern base offset.
+	mov	BaseOrder, 3B8h 		; Set the order base pointer.
+	mov	cx, 31				; Set the # of instruments.
+	jmp	ContModInit			; Continue the initialization.
+
+Mod8Init	EndP
+;			   ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ The STM initialization ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			   ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+STMInit 	Proc	Near
+
+	mov	PatBaseSegment, 49h		; Set the pattern base segment.
+	mov	PatBaseOffs, 0			; Set the pattern base offset.
+	mov	BaseOrder, 410h 		; Set the order base pointer.
+	mov	CmdParsers, 0			; Set relative call table
+	mov	CmdHandlers, 0			;  addresses.
+	mov	cx, 128 			; Seek all order bytes.
+	mov	al, 99				; AL = byte to find.
+	mov	di, 410h			; Point the first order byte.
+	repne	scasb				; Find the restart byte.
+	dec	di				; Back to previous byte.
+	mov	LastOrder, di			; Save the offset of last order.
+	mov	al, es:[20h]			; Fetch the tempo byte.
+	shr	al, 4				; Convert it to MOD format.
+	mov	SongSpeed, al			; And store it for the mixer.
+	lea	di, PeriodTable 		; Point the counters table.
+	mov	si, 48				; Point the STM instr. headers.
+	mov	cx, 31				; Set the number of instruments.
+	call	CalcCntrs			; Calculate the accum counters.
+	clc					; Clear the Carry flag.
+	ret					; Return to the caller.
+
+STMInit 	EndP
+;	       ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ The 31-instrument 4-channel MOD initialization ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;	       ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MODInit 	Proc	Near
+
+	mov	PatBaseSegment, 43h		; Set the pattern base segment.
+	mov	PatBaseOffs, 0Ch		; Set the pattern base offset.
+	mov	BaseOrder, 3B8h 		; Set the order base pointer.
+	mov	cx, 31				; Set the # of instruments.
+;		       ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ The general MOD initialization ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		       ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ContModInit:
+	mov	SongSpeed, 6			; Set the default song speed.
+	lea	ax, ModCmdParsers		; Load offset of ModCmdParsers.
+	sub	ax, Offset StmCmdParsers	; Calculate the relative offs.
+	mov	CmdParsers, ax			; Store the relative offset.
+	lea	ax, ModCmdHandlers		; Get offset of ModCmdHandlers.
+	sub	ax, Offset StmCmdHandlers	; Calculate the relative offs.
+	mov	CmdHandlers, ax 		; Save another relative offset.
+	push	cx				; Save the CX.
+	mov	si, BaseOrder			; Point order bytes.
+	movzx	ax, BPtr es:[si-2]		; Fetch the song length.
+	mov	cx, ax				; CX = Number of order bytes.
+	add	ax, si				; Point last order byte.
+	mov	LastOrder, ax			; Save the offset of last order.
+	xor	al, al				; Zero the AL.
+FindPatNum:
+	mov	ah, es:[si]			; Fetch the next order byte.
+	cmp	ah, al				; Higher than prev. highest?
+	jbe	NotHigher			; Jump if not.
+	cmp	ah, 99				; Compare with 99.
+	jae	NotHigher			; Jump if out of range.
+	mov	al, ah				; Copy it to AL.
+NotHigher:
+	inc	si				; Increment the pointer.
+	loop	FindPatNum			; Loop until orders scanned.
+	inc	al				; AL = Number of patterns.
+	xor	ah, ah				; Clear AH.
+	mov	cl, 6				; Default shift count in CL.
+	cmp	ModuleType, 3			; 8-channel ProTracker module?
+	jne	$+4				; Skip next instruction if not.
+	inc	cl				; Increment the shift count.
+	shl	ax, cl				; Multiply AX by pattern size.
+	add	ax, PatBaseSegment		; Add the pattern base segment.
+	mov	dx, 1				; DX = sample base segment.
+	add	dx, ax				; Add it to DX.
+;		ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Convert the instrument headers to STM format ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+	mov	si, 20				; Point MOD instr. table.
+	lea	di, InstrTable			; Point new STM instr. table.
+	pop	cx				; CX = Number of instruments.
+InstrLoop:					; Convert the instrument info.
+	mov	[di+14], dx			; Store the sample segment.
+	movzx	eax, WPtr es:[si+22]		; Fetch sample length.
+	xor	ebp, ebp			; Set the extra length to 0.
+	xchg	ah, al				; Exchange LSB and MSB.
+	add	ax, ax				; Multiply by two.
+	jnc	Below64k			; Skip if below 64kB.
+	mov	bp, ax				; Extra length = length - 65535.
+	inc	bp				; Add the missed byte.
+	mov	ax, 0FFFFh			; Length = 65535.
+Below64k:
+	mov	[di+16], ax			; Store the sample length.
+	mov	[di+4], bp			; Store the extra length.
+	or	ax, ax				; Set flags and skip a few
+	jz	NoSample			;  instructions if zero length.
+	add	eax, ebp			; Calculate the real length.
+	test	ax, 0Fh 			; Does it fit in paragraphs?
+	jz	LenOk				; Skip if it's already aligned.
+	add	eax, 10h			; Else add one paragraph.
+LenOk:
+	shr	eax, 4				; Convert length to paragraphs.
+	add	dx, ax				; And add it to the sample seg.
+NoSample:
+	mov	al, es:[si+25]			; Fetch sample volume.
+	mov	[di+22], al			; Store the volume.
+	mov	ax, es:[si+26]			; Fetch loop begin addr.
+	xchg	ah, al				; Exchange LSB and MSB.
+	add	ax, ax				; Multiply by two.
+	cmp	ax, [di+16]			; Compare it with sample length.
+	jnb	NoRep				; No loop at all if not valid.
+	mov	[di+18], ax			; Store the loop begin.
+	mov	bx, es:[si+28]			; Fetch loop length.
+	cmp	bx, 100h			; Is it 100h?
+	je	NoRep				; Jump if yes.
+	or	bx, bx				; Is the loop length zero?
+	jz	NoRep				; Skip if yes.
+	xchg	bh, bl				; Exchange LSB and MSB.
+	add	bx, bx				; Multiply by two.
+	add	bx, ax				; Add the loop begin.
+	cmp	bx, [di+16]			; Check if invalid end offset.
+	jbe	NoRep+3 			; Skip if valid end offset.
+	mov	bx, [di+16]			; Set InstrLen = Loop End.
+	jmp	$+5				; Skip the next instruction.
+NoRep:	mov	bx, 0FFFFh			; LoopEnd = 65535.
+	mov	[di+20], bx			; Store the loop end.
+	mov	al, es:[si+24]			; Get the finetune.
+	and	al, 0Fh 			; Extract the lower nibble.
+	mov	[di+24], al			; Store the finetune.
+	add	si, 30				; Increment source index.
+	add	di, 32				; Increment destination index.
+	loop	InstrLoop			; Loop until header converted.
+
+AllConverted:
+	cmp	FiveOctaves, 1			; Use five octaves?
+	jne	NoTables			; Skip if not.
+	pusha					; Save the general registers.
+	lea	di, PeriodTable 		; Point the counters table.
+	lea	si, FineTuneMidCs		; Point the Mid-C table.
+	mov	cx, 16				; Set the number of finetunes.
+FTuneLoop:
+	mov	bx, [si]			; Fetch the Mid-C speed.
+	add	si, 2				; Point next value.
+	call	MakeAccumTable			; Create its accumulator table.
+	add	di, 2*12*5			; Point the next table.
+	loop	FTuneLoop			; Create a table for all ftunes.
+	mov	NoteNum, 60			; Set the number of notes.
+	popa					; Restore the general regs.
+NoTables:
+	clc					; Clear the Carry flag.
+	ret
+
+MODInit 	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DI = The offset of the table where to store the counters.      º
+;º		SI = The offset of the instrument header table. 	       º
+;º		ES = The segment of the instrument header table.	       º
+;º		CX = Number of instruments in the table.		       º
+;º FUNCTION:	This routine calculates the period value for all notes.        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+CalcCntrs	Proc	Near
+
+	pusha					; Save the general registers.
+InstLoop:
+	mov	bx, es:[si+24]			; Fetch the Mid-C speed.
+	add	si, 32				; Point next instrument header.
+	or	bx, bx				; Is the Mid-C speed zero?
+	jz	NoTable 			; Don't make accum table if yes.
+	call	MakeAccumTable			; Create its accumulator table.
+NoTable:
+	add	di, 2*12*5			; Point the next table.
+	loop	InstLoop			; Create a table for all instrs.
+	popa					; Restore the general regs.
+	ret					; Return.
+
+CalcCntrs	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	BX = The MID-C (C-2) frequency of the instrument.	       º
+;º		DI = The offset of the table where to store the accumulators.  º
+;º FUNCTION:	This routine calculates the period values for each instrument. º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MakeAccumTable	Proc	Near
+
+	pushad					; Save all 32-bit registers.
+	lea	si, CalcTbl			; Point the calculation table.
+	shr	bx, 2				; Get the C-0 frequency.
+	mov	OldNote, bx			; Save the frequency.
+	mov	bp, bx				; Save it in the BP as well.
+	mov	eax, 428*8448			; Set the dividend in EAX.
+	shld	edx, eax, 16			; Shift the upper word in DX.
+	shl	ebx, 16 			; Shift the integer part up.
+	call	Divide				; Divide to get accum counter.
+	mov	[di], ax			; Store the integer part.
+	add	di, 2				; Point the next accum position.
+	mov	cx, 59				; Set the number of notes to do.
+MakeOctave:
+	mov	ax, bp				; Restore the old frequency.
+	cmp	WPtr [si], 0FFFFh		; End of table marker?
+	jne	NoWrp				; Skip if not.
+	lea	si, CalcTbl			; Wrap the SI.
+	add	bp, bp				; Multiply the BP by two.
+	jmp	MakeOctave			; Make the next octave.
+NoWrp:
+	cmp	WPtr [si], 0			; Halfnote?
+	jnz	NoHalf				; Skip if not.
+	push	cx				; Save the count.
+	mul	WPtr [si+4]			; Multiply.
+	shl	edx, 16 			; Shift the high bits up.
+	movzx	eax, ax 			; Clear the upper half of EAX.
+	or	eax, edx			; Combine them into the EAX.
+	movzx	ecx, WPtr [si+6]		; Fetch the divisor.
+	xor	edx, edx			; Clear the EDX.
+	div	ecx				; Divide.
+	sub	ax, OldNote			; Calculate the difference.
+	shr	ax, 1				; Divide it by two.
+	add	ax, OldNote			; Add the old frequency.
+	pop	cx				; Restore the count.
+	jmp	StoreNote			; Store the counter.
+NoHalf:
+	push	cx				; Save the count.
+	mul	WPtr [si]			; Multiply.
+	shl	edx, 16 			; Shift the high bits up.
+	movzx	eax, ax 			; Clear the upper half of EAX.
+	or	eax, edx			; Combine them into the EAX.
+	movzx	ecx, WPtr [si+2]		; Fetch the divisor.
+	xor	edx, edx			; Clear the EDX.
+	div	ecx				; Divide.
+	mov	OldNote, ax			; Save the old note.
+	pop	cx				; Restore the count.
+StoreNote:
+	add	si, 4				; Point the next table entry.
+	mov	bx, ax				; Copy the integer part to BX.
+	mov	eax, 428*8448			; Set the dividend in EAX.
+	shld	edx, eax, 16			; Shift the upper word in DX.
+	shl	ebx, 16 			; Shift it to the upper word.
+	call	Divide				; Divide to get accum counter.
+	sub	ax, 2				; In case of incorrect rounding!
+	mov	[di], ax			; Store the integer part.
+	add	di, 2				; Point the next accum position.
+	dec	cx				; Whole octave done?
+	jnz	MakeOctave			; Loop until it is.
+	popad					; Restore all Dword registers.
+	ret					; Return.
+
+MakeAccumTable	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DL = Shift value (2 for 4-channel mono) 		       º
+;º FUNCTION:	Calculates the volume table.				       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MakeVolTable	Proc	Near
+
+	mov	dh, 64				; Set the divisor.
+	push	es				; Save the ES.
+	mov	ax, cs				; Get the current code segment.
+	mov	es, ax				; Copy it to ES.
+	lea	di, VolConv			; DI --> Volumetable.
+	mov	cx, 65				; Make 65 tables.
+	xor	bh, bh				; Zero the table counter.
+TableLoop:
+	push	cx				; Save the CX.
+	mov	cx, 256 			; Make 256 entries.
+	xor	bl, bl				; Zero the byte counter.
+ByteLoop:
+	push	cx
+	movzx	ax, bl				; Copy the byte counter to AX.
+	imul	bh				; Multiply by the table counter.
+	idiv	dh				; Divide by 64.
+	mov	cl, dl				; Copy the shift value to CL.
+	sar	al, cl				; Shift AL right CL times.
+	stosb					; Store the value.
+	inc	bl				; Increment the byte counter.
+	pop	cx				; Restore the CX.
+	loop	ByteLoop			; Loop until zero.
+	inc	bh				; Increment the table counter.
+	pop	cx				; Restore the CX.
+	loop	TableLoop			; Loop until zero.
+	pop	es				; Restore the ES.
+	ret					; Return.
+
+MakeVolTable	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DX:AX = The dividend.					       º
+;º		EBX = The divisor in 16.16 format.			       º
+;º RETURNS:	DX = The integer part of the result.			       º
+;º		AX = The decimal part of the result.			       º
+;º FUNCTION:	This routine divides two integers, giving a real result.       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Divide	Proc	Near
+
+	shl	eax, 16 			; Shift the decimal part up.
+	movzx	edx, dx 			; Clear upper half of EDX.
+	div	ebx				; Divide EDX:EAX by EBX.
+	shld	edx, eax, 16			; Shift whole part in DX.
+	ret					; Return.
+
+Divide	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AX = The request: 0 = Enable IRQ, 1 = Disable IRQ.	       º
+;º		CX = The number of the IRQ to enable or disable.	       º
+;º FUNCTION:	This routine enables/disables IRQs.			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+IrqMasker	Proc	Near
+
+	cli					; Disable external interrupts.
+	or	ax, ax				; Which operation requested?
+	jz	EnableIrq			; Skip if enable requested.
+	shl	ax, cl				; Shift bit to correct position.
+	mov	ah, al				; Save the result.
+	in	al, 21h 			; Fetch the current IRQ mask.
+	or	al, ah				; Disable the requested IRQ.
+	out	21h, al 			; Send the new IRQ mask back.
+	sti					; Enable external interrupts.
+	ret					; Return.
+EnableIrq:
+	mov	ah, 1				; Set the basic IRQ mask in AH.
+	shl	ah, cl				; Shift bit to correct position.
+	not	ah				; Create the final IRQ mask.
+	in	al, 21h 			; Fetch the current IRQ mask.
+	and	al, ah				; Enable the requested IRQ.
+	out	21h, al 			; Send the new IRQ mask back.
+	sti					; Enable external interrupts.
+	ret					; Return.
+
+IrqMasker	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	CX = The number of the INT vector to fetch.		       º
+;º RETURNS:	EAX = The requested INT vector. 			       º
+;º FUNCTION:	This routine fetches an INT vector.			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GetIntVector	Proc	Near
+
+	cli					; Disable external interrupts.
+	push	si				; Save the SI.
+	push	ds				; Save the DS.
+	xor	ax, ax				;
+	mov	ds, ax				; DS = Interrupt Vector Table.
+	mov	si, cx				; Set SI = The Dword pointer.
+	shl	si, 2				; Multiply the SI by four.
+	lodsd					; Fetch the INT vector to EAX.
+	pop	ds				; Restore the DS.
+	pop	si				; Restore the SI.
+	sti					; Enable external interrupts.
+	ret					; Return.
+
+GetIntVector	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	EAX = The new address to be set in the INT vector.	       º
+;º		CX = The number of the INT vector to set.		       º
+;º FUNCTION:	This routine sets an INT vector.			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SetIntVector	Proc	Near
+
+	cli					; Disable external interrupts.
+	push	di				; Save the DI.
+	push	es				; Save the ES.
+	xor	di, di				;
+	mov	es, di				; ES = Interrupt Vector Table.
+	mov	di, cx				; Set DI = The Dword pointer.
+	shl	di, 2				; Multiply the DI by four.
+	stosd					; Store the INT vector in EAX.
+	pop	es				; Restore the ES.
+	pop	di				; Restore the DI.
+	sti					; Enable external interrupts.
+	ret					; Return.
+
+SetIntVector	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AX = The Covox number: 0 = Covox in LPT#1, 1 = Covox in LPT#2. º
+;º RETURNS:	AX = The LPT port address of the Covox used.		       º									    º
+;º FUNCTION:	This routine fetches the Covox's LPT port address.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+FetchCovoxAddr	Proc	Near
+
+	push	bx				; Save the BX.
+	push	ds				; Save the DS.
+	xor	bx, bx				; Use BX for clearing the DS.
+	mov	ds, bx				; Set DS = BIOS data area.
+	mov	bx, 408h			; Point the LPT#1 port address.
+	or	ax, ax				; Covox in LPT#1?
+	jz	Covox1				; Skip if yes.
+	add	bx, 2				; Else add two to the BX.
+Covox1: mov	ax, [bx]			; Fetch the Covox's address.
+	pop	ds				; Restore the DS.
+	pop	bx				; Restore the BX.
+	ret					; Return.
+
+FetchCovoxAddr	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	BX = The playing frequency used (0 = Reset normal BIOS values).º
+;º FUNCTION:	This routine sets the timer IRQ's frequency in the timer chip. º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SetTimerFreq	Proc	Near
+
+	cli					; Disable external interrupts.
+	in	al, 21h 			; Fetch the current IRQ mask.
+	or	al, 1				; Disable the timer IRQ.
+	out	21h, al 			; Send the new mask back.
+	or	bx, bx				; Normal values requested?
+	jz	NormalValues			; Skip the division if yes.
+	mov	dx, 12h 			; Set the dividend in DX:AX.
+	mov	ax, 34DCh			; The dividend is 1193180 Hz.
+	div	bx				; Divide by playing frequency.
+	out	40h, al 			; Set the counter low byte.
+	mov	al, ah				; Fetch the counter high byte.
+	out	40h, al 			; Then send it to the timer.
+	in	al, 21h 			; Fetch the current IRQ mask.
+	and	al, 0FEh			; Enable the timer IRQ.
+	out	21h, al 			; Send the new mask back.
+	sti					; Enable external interrupts.
+	ret					; Return to the initializer.
+NormalValues:
+	mov	al, 34h 			; Channel 0, Mode 2, binary.
+	out	43h, al 			; Port 43h, 8253 timer mode.
+	xor	ax, ax				; Clear the AX.
+	out	40h, al 			; Set the counter low byte.
+	mov	al, ah				; Fetch the counter high byte.
+	out	40h, al 			; Then send it to the timer.
+	in	al, 21h 			; Fetch the current IRQ mask.
+	and	al, 0FEh			; Enable the timer IRQ.
+	out	21h, al 			; Send the new mask back.
+	sti					; Enable external interrupts.
+	ret					; Return to the end-play hndlr.
+
+SetTimerFreq	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º FUNCTION:	This routine forces the first IRQ to start playing with SB.    º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ForceIrq	Proc	Near
+
+	mov	bx, PlayFreq			; Fetch the playing frequency.
+	mov	dx, 1				; Request play backwards.
+	call	SetDMASpeed			; Program the DMA -> DSP speed.
+	IFNDEF	PP_MODE 			; No retrace check if PP mode!
+	mov	dx, 3DAh			; Point the VGA status port.
+	in	al, dx				; Fetch the VGA status byte.
+	test	al, 8				; Vertical retrace on?
+	jz	$-3				; Wait until it is on.
+	ENDIF					; End of the retrace check.
+	mov	ax, SbIrqNumber 		; Fetch the SB's IRQ number.
+	add	al, 8				; Add IRQ vector base number.
+	mov	BPtr [IrqNmb+1], al		; Set it in the code.
+	jmp	$+2				; Flush the prefetch queue.
+IrqNmb: int	0Fh				; Force the first interrupt.
+	ret					; Return.
+
+ForceIrq	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º RETURNS:	DX = port address (220h if not found).			       º
+;º FUNCTION:	Detects the SoundBlaster base IO port address.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DetectSB	Proc   Near
+
+	mov	bx, 210h		; BX = The first base addr.
+TestNextAddr:
+	mov	dx, bx			; DX = The current SB base addr.
+	add	dl, 0Ch 		; Point the write status port.
+	mov	ah, 0D3h		; AH = Speaker off code.
+	mov	cx, 200h		; Wait 200 times.
+Wait1:	in	al, dx			; Get a byte from the status port.
+	or	al, al			; Set flags.
+	jns	Ready1			; Jump if buffer ready (bit 7 = 0).
+	loop	Wait1			; Try again.
+	jmp	SBNext			; No response - try the next address.
+Ready1: mov	al, ah			; AL = Turn speaker off code.
+	out	dx, al			; Send the code.
+	mov	cx, 0FFFFh		; Wait a moment (DSP is s-l-o-w).
+	loop	$
+	sub	dl, 0Ch-06h		; Point the DSP reset port.
+	mov	al, 01h 		; AL = The first reset code.
+	out	dx, al			; Send the code.
+	mov	cx, 0FFFFh		; Wait a moment (DSP is s-l-o-w).
+	loop	$
+	xor	al, al			; Clear the AL.
+	out	dx, al			; Send the second reset code.
+	mov	cx, 10h 		; Test 10 times.
+	add	dl, 0Eh-06h		; Point the data waiting status port.
+TestLp: push	cx			; Save the CX register.
+	mov	cx, 200h		; Test 200 times.
+Wait2:	in	al, dx			; Get the status byte.
+	or	al, al			; Set flags.
+	js	Ready2			; Jump if data waiting (bit 7 = 1).
+	loop	Wait2			; Try again.
+	jmp	SBNext			; No response - try the next address.
+Ready2: sub	dl, 0Eh-0Ah		; Point the ADC data port.
+	in	al, dx			; Get the data byte.
+	pop	cx			; Restore the CX register.
+	add	dl, 0Eh-0Ah		; Point to data waiting status port.
+	cmp	al, 0AAh		; Is the byte 0AAh?
+	je	SBFound 		; Yes, this is the right address!
+	loop	TestLp			; No, try again.
+SBNext: add	bx, 10h 		; BX = The next base addr.
+	cmp	bx, 260h		; Have all addresses been tested?
+	jbe	TestNextAddr		; No, go and test the next one.
+	mov	dx, 220h		; No SB found - use 220h as default...
+	ret				; ...just in case...
+SBFound:
+	mov	dx, bx			; Return the port addr. in DX.
+	ret
+
+DetectSB	Endp
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+CheckCmdStatus	Macro				; This one checks SB ready bit.
+
+	in	al, dx				; Fetch the cmd port's contents.
+	add	al, al				; Is the highest bit on?
+	jc	$-3				; Wait until it's off.
+
+	EndM
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DX = The base I/O address of the Sound Blaster. 	       º
+;º FUNCTION:	This routine initializes the Sound Blaster.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+InitializeSoundBlaster	Proc	Near
+
+	mov	al, 1				; Set AL = The first init code.
+	add	dx, 6				; Point the DSP reset port.
+	out	dx, al				; Send the first reset code.
+	mov	cx, 5000			; Set the delay count to 5000.
+	loop	$				; Give some time for the DSP.
+	dec	al				; Clear the AL.
+	out	dx, al				; Send the second reset code.
+	mov	cx, 5000			; Set the delay count to 5000.
+	loop	$				; Give some time for the DSP.
+	add	dx, 8				; Point the SB status port.
+	in	al, dx				; Clear the SB IRQ.
+	sub	dx, 4				; Point the SB read data port.
+	in	al, dx				; Fetch a byte from it.
+	add	dx, 2				; Point the SB command port.
+	CheckCmdStatus				; Wait until the DSP is ready.
+	mov	al, 0D1h			; Set a command byte in the AL.
+	out	dx, al				; Turn the speaker on.
+	CheckCmdStatus				; Wait until the SB "got it".
+	ret					; Return.
+
+InitializeSoundBlaster	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	BX = The playing frequency.				       º
+;º		DX = The direction of play: 0 = forward, 1 = backward.	       º
+;º FUNCTION:	This routine programs the DMA transfer speed in the DSP.       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SetDMASpeed	Proc	Near
+;			 ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Program the DMA controller ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			 ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+	mov	al, 05h 			; Set the DMA mask in the AL.
+	out	0Ah, al 			; Mask the DMA channel #1.
+	mov	ax, 49h 			; Request play backwards.
+	shl	dx, 5				; Multiply the mode by 20h.
+	add	ax, dx				; Then add it to the AX.
+	out	0Bh, al 			; Set the playing direction.
+	mov	ax, cs				; Fetch the CS value.
+	movzx	eax, ax 			; Zero-extend the AX into EAX.
+	mov	cx, ax				; Copy it temporarily to CX.
+	shl	cx, 4				; Discard the highest nibble.
+	add	cx, 1000			; Check for DMA address wrap.
+	mov	ecx, 0				; Default = No relocation.
+	jnc	AddressOK			; Skip if DMA page not crossed.
+	mov	cx, 1000			; Relocate the mixing buffer.
+AddressOK:
+	mov	MixBufReloc, cx 		; Use the second mixing buffer.
+	shl	eax, 4				; Convert it into absolute addr.
+	add	eax, 1000			; Point the end of the buffer.
+	add	eax, ecx			; Relocate the mixing buffer.
+	shr	eax, 16 			; Fetch the DMA page number.
+	out	83h, al 			; Pre-initialize the DMA page.
+	mov	al, 01h 			; Set the DMA mask in the AL.
+	out	0Ah, al 			; Unmask the DMA channel #1.
+;			     ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Initialize the DSP ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			     ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+	mov	dx, SbBaseIOAddr		; Fetch the SB's base I/O addr.
+	add	dx, 0Ch 			; Point the SB command register.
+	CheckCmdStatus				; Wait until the SB is ready.
+	mov	al, 40h 			; Request set transfer speed.
+	out	dx, al				; Send the request.
+	CheckCmdStatus				; Wait until the SB is ready.
+	mov	bp, dx				; Save the SB's base I/O addr.
+	mov	eax, 1000000			; Set EAX = 1000000.
+	xor	edx, edx			; Clear the EDX.
+	movzx	ebx, bx 			; Clear EBX.H.
+	div	ebx				; Divide EDX:EAX by the EBX.
+	mov	bx, 256 			; Set BX = 256.
+	sub	bx, ax				; Subtract the AX from it.
+	mov	ax, bx				; Set AX = BX.
+	mov	dx, bp				; Fetch the SB's base I/O addr.
+	out	dx, al				; Send the speed byte.
+	CheckCmdStatus				; Wait until the SB is ready.
+	ret					; Return.
+
+SetDMASpeed	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	EBX = The 20-bit DMA start address (segment * 16).	       º
+;º		 CX = The DMA transfer byte count.			       º
+;º FUNCTION:	This routine starts the DMA transfer.			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DMAPlayHandler	Proc	Near
+
+	mov	al, 05h 			; Set the DMA channel #1 mask.
+	out	0Ah, al 			; Send it.
+	mov	eax, ebx			; Fetch the 20-bit DMA address.
+	out	02h, al 			; Send the DMA address low byte.
+	shr	eax, 8				; Fetch its high byte.
+	out	02h, al 			; Send the DMA addr high byte.
+	mov	ax, cx				; Set the DMA count in the AX.
+	out	03h, al 			; Send the DMA count low byte.
+	mov	al, ah				; Fetch the DMA count high byte.
+	out	03h, al 			; Send it.
+	mov	al, 01h 			; Set the DMA channel #1 mask.
+	out	0Ah, al 			; Unmask the DMA channel one.
+	ret					; Return.
+
+DMAPlayHandler	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º	 THE IRQ HANDLERS FOR ALL SUPPORTED DEVICES FOR ALL PLAYING MODES      º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SbAutoHandler	Proc	Near
+
+	push	cx				; Save the CX.
+	push	dx				; Save the DX.
+	push	eax				; Save the EAX.
+	push	ebx				; Save the EBX.
+	mov	dx, cs:SbBaseIOAddr		; Fetch the SB's base I/O addr.
+	add	dx, 0Eh 			; Point the SB read data port.
+	in	al, dx				; Acknowledge the SB's IRQ.
+	mov	bx, cs				; Fetch the CS value.
+	movzx	ebx, bx 			; Sign-extend the BX into EBX.
+	shl	ebx, 4				; Convert it into a DMA address.
+        add     ebx, 500                        ; Point the end of the buffer.
+        movzx   eax, cs:MixBufReloc             ; Fetch the relocation offset.
+        add     ebx, eax                        ; Relocate the mixing buffer.
+
+        imul    ax, cs:ActiveBuf, 500
+	xor	cs:ActiveBuf, 1
+	add	ebx, eax
+
+	mov	cx, 499 			; Set the DMA transfer count.
+	sub	dx, 2				; DX = SB command port, 22Ch.
+	mov	al, 14h 			; Request play music.
+	out	dx, al				; Send the request.
+	CheckCmdStatus				; Wait until the SB is ready.
+	mov	ax, cx				; Set AX = the count.
+	out	dx, al				; Send the low byte.
+	CheckCmdStatus				; Wait until the SB is ready.
+	mov	al, ah				; Fetch the count high byte.
+	out	dx, al				; Send it; SB now initialized.
+	call	DMAPlayHandler			; Initialize the DMA transfer.
+	sti					; Allow interrupts now.
+        mov     al, 20h                         ; Signal EOI
+        out     20h, al                         ;  to the interrupt controller.
+
+	imul	bx, cs:ActiveBuf, 500
+        add     bx, 500
+        add     bx, cs:MixBufReloc              ; Relocate the mixing buffer.
+        mov     cx, 500
+        call    MixerParser                     ; Mix 500 new bytes.
+	pop	ebx				; Restore the EBX.
+	pop	eax				; Restore the EAX.
+	pop	dx				; Restore the DX.
+	pop	cx				; Restore the CX.
+	iret					; Return.
+
+ActiveBuf	DW	0
+
+SbAutoHandler	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SbCallHandler	Proc	Far
+
+	IFNDEF	PP_MODE
+
+	push	cx			    ; 2 ; Save the CX.
+	push	dx			    ; 2 ; Save the DX.
+	push	eax			    ; 2 ; Save the EAX.
+	push	ebx			    ; 2 ; Save the EBX.
+	xor	eax, eax		    ; 2 ; Clear the EAX.
+	mov	dx, cs:SbBaseIOAddr	    ; 4 ; Fetch the SB's base I/O addr.
+	add	dx, 0Eh 		    ; 2 ; Point the SB read data port.
+	in	al, dx			    ;13 ; Acknowledge the SB's IRQ.
+	mov	ax, cs			    ; 2 ; Fetch the CS value.
+	shl	eax, 4			    ; 3 ; Convert it into a DMA address.
+	mov	ebx, 500		    ; 2 ; Point the end of the 1st buf.
+BufAddr:shl	bx, 0			    ; 3 ; Select the buffer to play.
+	xor	BPtr cs:[BufAddr+2], 1	    ; 7 ; Flip the SHL count byte.
+	xor	cs:FreeBuffer, 1	    ; 7 ; Flip the free buffer pointer.
+	add	ebx, eax		    ; 2 ; Set the DMA offset.
+	movzx	eax, cs:MixBufReloc	    ; 5 ; Fetch the relocation offset.
+	add	ebx, eax		    ; 2 ; Relocate the mixing buffer.
+	mov	cx, cs:MixCount 	    ; 4 ; Fetch the byte count.
+	dec	cx			    ; 2 ; Adjust the byte count.
+	mov	dx, cs:SbBaseIOAddr	    ; 4 ; Fetch the SB's base I/O addr.
+	add	dx, 0Ch 		    ; 2 ; Point the SB command port.
+	mov	al, 14h 		    ; 2 ; Request play music.
+	out	dx, al			    ;11 ; Send the request.
+	CheckCmdStatus			    ; - ; Wait until the SB is ready.
+	mov	ax, cx			    ; 2 ; Set AX = the count.
+	out	dx, al			    ;11 ; Send the low byte.
+	CheckCmdStatus			    ; - ; Wait until the SB is ready.
+	mov	al, ah			    ; 2 ; Fetch the count high byte.
+	out	dx, al			    ;11 ; Send it; SB now initialized.
+	call	DMAPlayHandler		    ; - ; Initialize the DMA transfer.
+	mov	al, 20h 		    ; 2 ; Signal End-Of-Interrupt.
+	out	20h, al 		    ;10 ; To the interrupt controller.
+	pop	ebx			    ; 4 ; Restore the EBX.
+	pop	eax			    ; 4 ; Restore the EAX.
+	pop	dx			    ; 4 ; Restore the DX.
+	pop	cx			    ; 4 ; Restore the CX.
+	iret				    ; - ; Interrupt return.
+
+	ENDIF
+
+SbCallHandler	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;SbCallHandler	 Proc	 Far			 ; IRQ handler for COPPER-mode.
+;
+;	 IFNDEF  PP_MODE
+;
+;	 mov	 DPtr cs:[SbReInit], 0C089C089h  ; Self-modify two dummy MOVs.
+;	 iret					 ; Then quickly return.
+;
+;	 ENDIF
+;
+;SbCallHandler	 EndP
+;
+;	 Align	 4
+;
+;SbReInit	 Proc	 Far
+;
+;	 IFNDEF  PP_MODE
+;
+;SbReInitNear:
+;	 retf
+;	 nop
+;	 nop
+;	 nop				     ; 2 * 2 = 4
+;
+;	 push	 dx			     ; 2 ; Save the DX.
+;	 push	 eax			     ; 2 ; Save the EAX.
+;	 push	 ebx			     ; 2 ; Save the EBX.
+;	 mov	 dx, cs:SbBaseIOAddr	     ; 4 ; Fetch the SB's base I/O addr.
+;	 add	 dx, 0Ch		     ; 2 ; Point the SB command port.
+;	 mov	 al, 14h		     ; 2 ; Request play music.
+;	 out	 dx, al 		     ;11 ; Send the request.
+;	 mov	 ax, cs 		     ; 2 ; Fetch the CS value.
+;	 shl	 eax, 4 		     ; 3 ; Convert it into a DMA address.
+;	 mov	 ebx, 500		     ; 2 ; Point the end of the 1st buf.
+;BufAddr:shl	 bx, 0			     ; 3 ; Select the buffer to play.
+;	 xor	 BPtr cs:[BufAddr+2], 1      ; 7 ; Flip the SHL count byte.
+;	 add	 ebx, eax		     ; 2 ; Set the DMA offset.
+;	 movzx	 eax, cs:MixBufReloc	     ; 5 ; Fetch the relocation offset.
+;	 add	 ebx, eax		     ; 2 ; Relocate the mixing buffer.
+;	 mov	 al, 05h		     ; 2 ; Set the DMA channel #1 mask.
+;	 out	 0Ah, al		     ;10 ; Send it.
+;	 mov	 eax, ebx		     ; 2 ; Fetch the 20-bit DMA address.
+;	 out	 02h, al		     ;10 ; Send the DMA address low byte.
+;	 shr	 eax, 8 		     ; 2 ; Fetch its high byte.
+;	 out	 02h, al		     ;10 ; Send the DMA addr high byte.
+;	 mov	 ax, Offset Second-SbReInit-2; 2 ; Calculate the relative addr.
+;	 mov	 ah, al 		     ; 2 ; Copy the offset to the AH.
+;	 mov	 al, 0EBh		     ; 2 ; Set the opcode in AL.
+;	 mov	 WPtr cs:[SbReInit], ax      ; 2 ; Self-modify: JMP Second
+;	 pop	 ebx			     ; 4 ; Restore the EBX.
+;	 pop	 eax			     ; 4 ; Restore the EAX.
+;	 pop	 dx			     ; 4 ; Restore the DX.
+;	 retf				     ;18 ; Return to main program.
+;					     ;125 + 4 = 129
+;Second:
+;	 push	 ax			     ; 2 ; Save the AX.
+;	 push	 dx			     ; 2 ; Save the DX.
+;	 mov	 dx, cs:SbBaseIOAddr	     ; 4 ; Set DX = The SB's base addr.
+;	 add	 dx, 0Ch		     ; 2 ; Point the SB command port.
+;	 in	 al, dx 		     ;13 ; Fetch the contents of it.
+;	 add	 al, al 		     ; 2 ; Check the highest bit.
+;	 jc	 NotOutputYet		     ; 3 ; Wait until it's off.
+;	 xor	 cs:FreeBuffer, 1	     ; 7 ; Flip the free buffer pointer.
+;	 mov	 ax, cs:MixCount	     ; 4 ; Fetch the byte count.
+;	 dec	 ax			     ; 2 ; Adjust the byte count.
+;	 out	 dx, al 		     ;11 ; Send low byte of the count.
+;	 out	 03h, al		     ;10 ; Send the DMA count low byte.
+;	 mov	 al, ah 		     ; 2 ; Fetch the DMA count high byte.
+;	 out	 03h, al		     ;10 ; Send it.
+;	 mov	 al, 01h		     ; 2 ; Set the DMA channel #1 mask.
+;	 out	 0Ah, al		     ;10 ; Unmask the DMA channel one.
+;	 mov	 ax, Offset Third-SbReInit-3 ; 2 ; Calculate the relative addr.
+;	 mov	 ah, al 		     ; 2 ; Copy the offset to the AH.
+;	 mov	 al, 0E9h		     ; 2 ; Set the opcode in AL.
+;	 mov	 WPtr cs:[SbReInit], ax      ; 2 ; Self-modify: JMP Third.
+;	 mov	 BPtr cs:[SbReInit+2], 0     ; 2 ; High-byte of offset is zero.
+;	 pop	 dx			     ; 4 ; Restore the DX.
+;	 pop	 ax			     ; 4 ; Restore the AX.
+;	 retf				     ;18 ; Return to main program.
+;					     ;112+8 = 120
+;
+;Third:
+;	 push	 ax			     ; 2 ; Save the AX.
+;	 push	 dx			     ; 2 ; Save the DX.
+;	 mov	 ax, cs:MixCount	     ; 4 ; Fetch the byte count.
+;	 dec	 ax			     ; 2 ; Adjust the byte count.
+;	 mov	 dx, cs:SbBaseIOAddr	     ; 4 ; Set DX = The SB's base addr.
+;	 add	 dx, 0Ch		     ; 2 ; Point the SB command port.
+;	 in	 al, dx 		     ;13 ; Fetch the contents of it.
+;	 add	 al, al 		     ; 2 ; Check the highest bit.
+;	 jc	 NotOutputYet		     ; 3 ; Wait until it's off.
+;	 mov	 al, ah 		     ; 2 ; Fetch the count high byte.
+;	 out	 dx, al 		     ;11 ; Send the count high byte.
+;	 add	 dx, 2			     ; 2 ; Point the SB read port, 22Eh.
+;	 in	 al, dx 		     ;13 ; Acknowledge the SB's IRQ.
+;	 mov	 al, 01h		     ; 2 ; Set the DMA channel #1 mask.
+;	 out	 0Ah, al		     ;10 ; Unmask the DMA channel one.
+;	 mov	 al, 20h		     ; 2 ; Signal End-Of-Interrupt.
+;	 out	 20h, al		     ;10 ; To the interrupt controller.
+;	 mov	 BPtr cs:[SbReInit], 0CBh    ; 2 ; Self-modify a RETF.
+;
+;NotOutputYet:
+;	 pop	 dx			     ; 4 ; Restore the DX.
+;	 pop	 ax			     ; 4 ; Restore the AX.
+;	 retf				     ;18 ; Return to main program.
+;					     ;114+8 = 122
+;	 ENDIF
+;
+;SbReInit	 EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+CvxAutoHandler	Proc	Near
+
+	push	ax				; Save the AX.
+	push	dx				; Save the DX.
+	dec	cs:TimeCntr			; Time to execute BIOS timer?
+	jz	BIOSTime			; Skip if it is.
+SrcPtr1:mov	al, cs:[0001h]			; Fetch the byte to play.
+	dec	WPtr cs:[SrcPtr1+2]		; Point to next byte to play.
+	jz	WrapPtr1			; Check if the end reached yet.
+Port1:	mov	dx, 0000h			; The LPT port's address.
+	out	dx, al				; Play the sample byte.
+	mov	al, 20h 			; The End-Of-Interrupt signal.
+	out	20h, al 			; Acknowledge the int ctrlr.
+	pop	dx				; Restore the DX.
+	pop	ax				; Restore the AX.
+	iret					; Interrupt return.
+
+WrapPtr1:
+	push	bx				; Save the BX.
+	push	cx				; Save the CX.
+	mov	al, 20h 			; Send the EOI signal..
+	out	20h, al 			; to the interrupt controller.
+	sti					; Enable external interrupts.
+	mov	WPtr cs:[SrcPtr1+2], 1000	; Wrap the byte pointer.
+	mov	bx, 980 			; Set the mixing offset.
+	mov	cx, bx				; Set the mix byte count.
+	call	MixerParser			; Mix 980 new bytes.
+	mov	bx, 1000			; Set the mixing offset.
+	mov	cx, 20				; Set the mix byte count.
+	call	MixerParser			; Mix 20 bytes for the next IRQ.
+	pop	cx				; Restore the CX.
+	pop	bx				; Restore the BX.
+	pop	dx				; Restore the DX.
+	pop	ax				; Restore the AX.
+	iret					; Interrupt return.
+
+BIOSTime:
+	pushf					; Save the flags.
+	mov	ax, cs:TimeCntrOrg		; Fetch the original counter.
+	mov	cs:TimeCntr, ax 		; Restore the timer counter.
+	call	DPtr cs:OldInt08		; Execute the BIOS timer.
+	pop	dx				; Restore the DX.
+	pop	ax				; Restore the AX.
+	iret					; Interrupt return.
+
+CvxAutoHandler	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+CvxCallHandler	Proc	Near
+
+	IFNDEF	PP_MODE
+
+	push	ax				; Save the AX.
+	push	dx				; Save the DX.
+	dec	cs:TimeCntr			; Time to execute BIOS timer?
+	jz	BIOSTime			; Skip if it is.
+SrcPtr2:mov	al, cs:[0001h]			; Point the byte to play.
+	dec	WPtr cs:[SrcPtr2+2]		; Decrement the byte pointer.
+	dec	cs:PlayCount			; Decrement the byte counter.
+	jz	WrapPtr2			; Jump if time to flip buffers.
+Port2:	mov	dx, 0000h			; Self-modify the port address.
+	out	dx, al				; Play the byte.
+	mov	al, 20h 			; Send the EOI signal..
+	out	20h, al 			; to the interrupt controller.
+	pop	dx				; Restore the DX.
+	pop	ax				; Restore the AX.
+	iret					; Return.
+
+WrapPtr2:
+	mov	ax, 500 			; Default = play 1st buffer.
+BufOffs:shl	ax, 0				; Select the buffer to play.
+	xor	BPtr cs:[BufOffs+2], 1		; Flip the SHL count byte.
+	mov	WPtr cs:[SrcPtr2+2], ax 	; Wrap the byte pointer.
+	mov	ax, cs:MixCount 		; Get the mixing count.
+	mov	cs:PlayCount, ax		; Store it for temporary use.
+	xor	cs:FreeBuffer, 1		; Flip the free buffer pointer.
+	mov	al, 20h 			; Send the EOI signal..
+	out	20h, al 			; to the interrupt controller.
+	pop	dx				; Restore the DX.
+	pop	ax				; Restore the AX.
+	iret					; Return.
+
+	ENDIF
+
+CvxCallHandler	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+
+	include \asm\inc\mixparse.386	 ; Include the 80386 mixerparser.
+	include \asm\inc\msysdata.386	 ; Include the data definitions.
+
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+MusicSys	EndS

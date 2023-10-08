@@ -1,0 +1,28 @@
+;컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴�
+UsageMessage    Label   Byte
+DB      13,10,'USAGE: PP [-C] [-P] [-Sn] [-Dn] [-In] [-Mn] Filename',13,10,13,10
+DB      '       ',34,'Filename',34,' is the module to play and the optional '
+DB      'flags are:',13,10,13,10
+DB      '        -C  = Configure PowerPlayer.',13,10
+DB      '        -P  = Disable ProTracker''s Extended Tempos.',13,10
+DB      '        -O  = Use five octaves instead of three.',13,10
+DB      '        -Sn = Set the playing frequency to n (4000..22000).',13,10
+DB      '        -In = Set the SB IRQ number to n (2,3,5 or 7).',13,10
+DB      '        -Dn = Set playing device to n:',13,10
+DB      '              1) Sound Blaster',13,10
+DB      '              2) DAC in LPT1',13,10
+DB      '              3) DAC in LPT2',13,10
+DB      '        -Mn = Force module type to n:',13,10
+DB      '              0) STM',13,10
+DB      '              1) Normal MOD',13,10
+DB      '              2) A MOD-file with 15 instruments',13,10
+DB      '              3) An 8-channel .WOW or OctaComposer module',13,10,'$'
+
+DosErr	     DB  'DOS 3.30 required!',13,10,'$'
+CpuErr	     DB  '80386 required!',13,10,'$'
+OvlErrMsg    DB  'Can''t write overlay file!',13,10,'$'
+MemErrMsg    DB  'Not enough memory!',10,13,'$'
+FileErrorMsg DB  'Module read error!',10,13,'$'
+EnvErrMsg1   DB  'DOS ENVIRONMENT error: '
+	     DB  'Cannot find DOS load path!',13,10,'$'
+;컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴�

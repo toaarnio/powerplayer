@@ -1,0 +1,1767 @@
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º		T H E	4 - C H A N N E L   M U Z A K	M I X E R	       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MixerParser	Proc	Near
+
+	pushad				; Save all 32-bit general registers.
+	push	es			; Save the ES.
+	push	ds			; Save the DS.
+	push	fs			; Save the FS.
+	push	gs			; Save the GS.
+	mov	ax, cs			; Set the Data Segment...
+	mov	ds, ax			; ...to point to CS via AX.
+	xor	eax, eax		; Zero EAX.
+	mov	edx, eax		; Zero EDX.
+	mov	MixBufOffs, bx		; Save the mixing buffer's offset.
+	mov	MixBufCount, cx 	; Store the number of bytes to mix.
+
+MixSomeMore:
+	mov	ax, SlideCounter	; Get the SlideCounter in AX.
+	mov	bx, MixBufCount 	; And the mixing count in BX.
+	cmp	ax, bx			; Compare the two counts.
+	jbe	$+3			; Skip if AX is the smaller one.
+	xchg	bx, ax			; Exchange the counts; now AX < BX.
+
+	mov	bx, MixBufOffs		; Fetch the mixing buffer's offset.
+	mov	dx, bx			; Copy the buffer's offset in DX.
+	sub	bx, ax			; Offset of the last byte to mix -> BX.
+	mov	WPtr [MixPos+4], bx	; Self-modify the buffer's position.
+	mov	WPtr [MixPos2+4], bx	; Do the same for the other mixloop.
+	mov	dx, ax			; Set the count in DX for the mixer.
+	call	Mix4Channels		; Mix the first four channels.
+	cmp	ModuleType, 3		; Is this an 8-channel module?
+	jne	$+5			; Don't call the mixer anymore if not.
+	call	Mix8Channels		; Mix the possible remaining channels.
+
+	sub	SlideCounter, ax	; Sub the byte count from SlideCounter.
+	jz	GoHandleCommands	; Go handle commands if it reached 0.
+Done:	sub	MixBufOffs, ax		; Set the mixer's new starting offset.
+	sub	MixBufCount, ax 	; Desired # of bytes mixed already?
+	ja	MixSomeMore		; Go mix some more if not.
+
+	pop	gs			; Restore the GS...
+	pop	fs			; ...and FS...
+	pop	ds			; ...and DS...
+	pop	es			; ...and finally ES.
+	popad				; Restore all 32-bit general registers.
+	ret				; Return.
+
+;		     ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Handle commands 50 times per second ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		     ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GoHandleCommands:
+	call	HandleCommands		; Call the command handler.
+	mov	cx, SlideOrg		; Fetch the old command count.
+	mov	SlideCounter, cx	; Restore the command counter.
+	jmp	Done			; Command handling done.
+
+MixerParser	Endp
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º		    M I X E R	F O R	C H A N N E L S   1 - 4 	       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Mix4Channels	Proc	Near
+
+	push	ax dx ds		; Save the regs needed by MixerParser.
+	mov	ax, 8166h		; Instruction to be self-modified.
+	mov	WPtr Acc1, ax		; Self-modify instr. "ADD ESI, imm32".
+	mov	WPtr Acc2, ax		; Self-modify instr. "ADD EDI, imm32".
+	mov	WPtr Acc3, ax		; Self-modify instr. "ADD EBX, imm32".
+	mov	WPtr Acc4, ax		; Self-modify instr. "ADD EBP, imm32".
+	xor	ax, ax			; Zero the AX for volume fetching.
+	lds	esi, cs:SamplePtr1	; DS:SI -> Sample1, ESI.H = Accumulator
+	les	edi, cs:SamplePtr2	; ES:DI -> Sample2, EDI.H = Accumulator
+	lfs	ebx, cs:SamplePtr3	; FS:BX -> Sample3, EBX.H = Accumulator
+	lgs	ebp, cs:SamplePtr4	; GS:BP -> Sample4, EBP.H = Accumulator
+	Align	4			; Dword-align for faster execution.
+
+MixSamples:				; -- 91 cycles on i386, 42 on i486. --
+;	 IFNDEF  PP_MODE
+;	 push	 cs			 ; Push the CS; simulate Call Far.
+;	 call	 SbReInitNear		 ; Near call to the SB re-initializer.
+;	 ENDIF
+;			ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Fetch byte from first channel ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+	xor	cx, cx			; 2 / 1 / Clear the sample mixing word.
+Acc1:	add	esi, 11110000h		; 2 / 1 / Add the 32-bit accumulator.
+	adc	si, 0			; 2 / 1 / Handle the possible carry.
+Len1:	cmp	si, Offset DummyByte	; 2 / 1 / Whole instrument mixed?
+	jnb	EndOfIns1		; 3 / 1 / Reset pointers if yes.
+	mov	al, [si]		; 4 / 1 / Fetch a byte from sample.
+Vol1:	mov	cl, cs:VolConv[eax]	; 4 / 2 / Fetch first byte to mix.
+;			ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Fetch byte from second channel ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Acc2:	add	edi, 11110000h		; 2 / 1 / Add the 32-bit accumulator.
+	adc	di, 0			; 2 / 1 / Handle the possible carry.
+Len2:	cmp	di, Offset Dummybyte	; 2 / 1 / Whole instrument mixed?
+	jnb	EndOfIns2		; 3 / 1 / Reset pointers if yes.
+	mov	al, es:[di]		; 4 / 2 / Fetch a byte from sample.
+Vol2:	mov	ch, cs:VolConv[eax]	; 4 / 2 / Fetch second byte to mix.
+;			ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Fetch byte from third channel ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Acc3:	add	ebx, 11110000h		; 2 / 1 / Add the 32-bit accumulator.
+	adc	bx, 0			; 2 / 1 / Handle the possible carry.
+Len3:	cmp	bx, Offset DummyByte	; 2 / 1 / Whole instrument mixed?
+	jnb	EndOfIns3		; 3 / 1 / Reset pointers if yes.
+	mov	al, fs:[bx]		; 4 / 2 / Fetch a byte from sample.
+Vol3:	add	ch, cs:VolConv[eax]	; 6 / 3 / Fetch third byte to mix.
+;			ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Fetch byte from fourth channel ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Acc4:	add	ebp, 11110000h		; 2 / 1 / Add the 32-bit accumulator.
+	adc	bp, 0			; 2 / 1 / Handle the possible carry.
+Len4:	cmp	bp, Offset Dummybyte	; 2 / 1 / Whole instrument mixed?
+	jnb	EndOfIns4		; 3 / 1 / Reset pointers if yes.
+	mov	al, gs:[bp]		; 4 / 2 / Fetch a byte from sample.
+Vol4:	add	cl, cs:VolConv[eax]	; 6 / 3 / CL=left, CH=right channel.
+;		      ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Place the mixed byte in the buffer ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		      ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Done1:	add	cl, ch			; 2 / 1 / Mix the two channels as one.
+	add	cl, 80h 		; 2 / 1 / Convert the CL to SB format.
+MixPos: mov	cs:[edx+500], cl	; 2 / 2 / Save the mixed byte in buf.
+	dec	dx			; 2 / 1 / Decrement the buffer index.
+	jnz	MixSamples		; 9 / 3 / Go mix more bytes.
+
+	mov	cs:InstrPointer1, esi	; Save new offset to sample1.
+	mov	cs:InstrPointer2, edi	; Save new offset to sample2.
+	mov	cs:InstrPointer3, ebx	; Save new offset to sample3.
+	mov	cs:InstrPointer4, ebp	; Save new offset to sample4.
+	pop	ds dx ax		; Restore the regs needed to spare.
+	ret				; Return to the MixerParser.
+
+;		 ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ End of instrument handlers for each channel ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		 ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+EndOfIns1:
+	cmp	cs:ExtraLen1, 0 	; Is the length of sample over 64 kB?
+	jnz	LongInst1		; Jump if sample is over 64 kB.
+	cmp	cs:Repeat1, 1		; Instrument looped?
+	je	ResetLoop1		; Go reset the loop if it is.
+	mov	DPtr cs:Acc1+3, 0	; Zero out the accumulator.
+	mov	WPtr cs:Acc1, 1AEBh	; Self-modify a jump to the mixer.
+	jmp	Acc2			; Then go mix the next byte.
+ResetLoop1:
+	mov	si, cs:RepeatTo1	; Fetch the loop end offset.
+	mov	WPtr cs:Len1+2, si	; Set it to be end of the spl.
+	mov	si, cs:RepeatFrom1	; Fetch the loop start offset.
+	jmp	Acc1			; Go mix the first channel.
+LongInst1:
+	mov	ax, ds			; Fetch the current sample segment.
+	add	ax, 1000h		; Point to the next 64 kB block.
+	mov	ds, ax			; Set the new value as CurSplSeg.
+	mov	cs:InstrumentSeg1, ax	; Save the first sample's new segment.
+	mov	ax, cs:ExtraLen1	; Fetch the length exceeding 64 kB.
+	mov	WPtr cs:Len1+2, ax	; Store the new sample length in mixer.
+	xor	ax, ax			; Clear the accumulator.
+	mov	si, ax			; DS:SI --> Next block of sample.
+	mov	cs:ExtraLen1, ax	; Zero the ExtraLen variable.
+	jmp	Acc1			; Go mix the first channel.
+	Align	4			; Dword-align for faster execution.
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+EndOfIns2:
+	cmp	cs:ExtraLen2, 0 	; Is the length of sample over 64 kB?
+	jnz	LongInst2		; Jump if sample is over 64 kB.
+	cmp	cs:Repeat2, 1		; Instrument looped?
+	je	ResetLoop2		; Go reset the loop if it is.
+	mov	DPtr cs:Acc2+3, 0	; Zero out the accumulator.
+	mov	WPtr cs:Acc2, 1BEBh	; Self-modify a jump to the mixer.
+	jmp	Acc3			; Then go mix the next byte.
+ResetLoop2:
+	mov	di, cs:RepeatTo2	; Fetch the loop end offset.
+	mov	WPtr cs:Len2+2, di	; Set it to be end of the spl.
+	mov	di, cs:RepeatFrom2	; Fetch the loop start offset.
+	jmp	Acc2			; Go mix the second channel.
+LongInst2:
+	mov	ax, es			; Fetch the current sample segment.
+	add	ax, 1000h		; Point to the next 64 kB block.
+	mov	es, ax			; Set the new value as CurSplSeg.
+	mov	cs:InstrumentSeg2, ax	; Save the second sample's new segment.
+	mov	ax, cs:ExtraLen2	; Fetch the length exceeding 64 kB.
+	mov	WPtr cs:Len2+2, ax	; Store the new sample length in mixer.
+	xor	ax, ax			; Clear the accumulator.
+	mov	di, ax			; ES:DI --> Next block of sample.
+	mov	cs:ExtraLen2, ax	; Zero the ExtraLen variable.
+	jmp	Acc2			; Go mix the second channel.
+	Align	4			; Dword-align for faster execution.
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+EndOfIns3:
+	cmp	cs:ExtraLen3, 0 	; Is the sample over 64 kB long?
+	jnz	LongInst3		; Jump if sample is over 64 kB.
+	cmp	cs:Repeat3, 1		; Instrument looped?
+	je	ResetLoop3		; Go reset the loop if it is.
+	mov	DPtr cs:Acc3+3, 0	; Zero out the accumulator.
+	mov	WPtr cs:Acc3, 1BEBh	; Self-modify a jump to the mixer.
+	jmp	Acc4			; Then go mix the next byte.
+ResetLoop3:
+	mov	bx, cs:RepeatTo3	; Fetch the loop end offset.
+	mov	WPtr cs:Len3+2, bx	; Set it to be end of the spl.
+	mov	bx, cs:RepeatFrom3	; Fetch the loop start offset.
+	jmp	Acc3			; Go mix the third channel.
+LongInst3:
+	mov	ax, fs			; Fetch the current sample segment.
+	add	ax, 1000h		; Point to the next 64 kB block.
+	mov	fs, ax			; Set the new value as CurSplSeg.
+	mov	cs:InstrumentSeg3, ax	; Save the third sample's new segment.
+	mov	ax, cs:ExtraLen3	; Fetch the length exceeding 64 kB.
+	mov	WPtr cs:Len3+2, ax	; Store the new sample length in mixer.
+	xor	ax, ax			; Clear the accumulator.
+	mov	bx, ax			; FS:BX --> Next block of sample.
+	mov	cs:ExtraLen3, ax	; Zero the ExtraLen variable.
+	jmp	Acc3			; Go mix the third channel.
+	Align	4			; Dword-align for faster execution.
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+EndOfIns4:
+	cmp	cs:ExtraLen4, 0 	; Is the sample over 64 kB long?
+	jnz	LongInst4		; Jump if sample is over 64 kB.
+	cmp	cs:Repeat4, 1		; Instrument looped?
+	je	ResetLoop4		; Go reset the loop if it is.
+	mov	DPtr cs:Acc4+3, 0	; Zero out the accumulator.
+	mov	WPtr cs:Acc4, 1CEBh	; Self-modify a jump to the mixer.
+	jmp	Done1			; Mixing completed.
+ResetLoop4:
+	mov	bp, cs:RepeatTo4	; Fetch the loop end offset.
+	mov	WPtr cs:Len4+2, bp	; Set it to be end of the spl.
+	mov	bp, cs:RepeatFrom4	; Fetch the loop start offset.
+	jmp	Acc4			; Go mix the fourth channel.
+LongInst4:
+	mov	ax, gs			; Fetch the current sample segment.
+	add	ax, 1000h		; Point to the next 64 kB block.
+	mov	gs, ax			; Set the new value as CurSplSeg.
+	mov	cs:InstrumentSeg4, ax	; Save the fourth sample's new segment.
+	mov	ax, cs:ExtraLen4	; Fetch the length exceeding 64 kB.
+	mov	WPtr cs:Len4+2, ax	; Store the new sample length in mixer.
+	xor	ax, ax			; Clear the accumulator.
+	mov	bp, ax			; GS:BP --> Next block of sample.
+	mov	cs:ExtraLen4, ax	; Zero the ExtraLen variable.
+	jmp	Acc4			; Go mix the fourth channel.
+
+Mix4Channels	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º		    M I X E R	F O R	C H A N N E L S   5 - 8 	       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Mix8Channels	Proc	Near
+
+	push	ax ds			; Save the regs needed by MixerParser.
+	mov	ax, 8166h		; Instruction to be self-modified.
+	mov	WPtr Acc5, ax		; Self-modify instr. "ADD ESI, imm32".
+	mov	WPtr Acc6, ax		; Self-modify instr. "ADD EDI, imm32".
+	mov	WPtr Acc7, ax		; Self-modify instr. "ADD EBX, imm32".
+	mov	WPtr Acc8, ax		; Self-modify instr. "ADD EBP, imm32".
+	xor	ax, ax			; Zero the AX for volume fetching.
+	lds	esi, cs:SamplePtr5	; DS:SI -> Sample5, ESI.H = Accumulator
+	les	edi, cs:SamplePtr6	; ES:DI -> Sample6, EDI.H = Accumulator
+	lfs	ebx, cs:SamplePtr7	; FS:BX -> Sample7, EBX.H = Accumulator
+	lgs	ebp, cs:SamplePtr8	; GS:BP -> Sample8, EBP.H = Accumulator
+	Align	4			; Dword-align for faster execution.
+
+MixSamples2:				; -- 94 cycles / pass on 80386. --
+;			ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Fetch byte from fifth channel ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+	xor	cx, cx			; 2 / Clear the sample mixing word.
+Acc5:	add	esi, 11110000h		; 2 / Add the 32-bit accumulator.
+	adc	si, 0			; 2 / Handle the possible carry.
+Len5:	cmp	si, Offset DummyByte	; 2 / Whole instrument mixed?
+	jnb	EndOfIns5		; 3 / Reset pointers if yes.
+	mov	al, [si]		; 4 / Fetch a byte from sample.
+Vol5:	mov	cl, cs:VolConv[eax]	; 4 / Fetch first byte to mix.
+;			ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Fetch byte from sixth channel ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Acc6:	add	edi, 11110000h		; 2 / Add the 32-bit accumulator.
+	adc	di, 0			; 2 / Handle the possible carry.
+Len6:	cmp	di, Offset Dummybyte	; 2 / Whole instrument mixed?
+	jnb	EndOfIns6		; 3 / Reset pointers if yes.
+	mov	al, es:[di]		; 4 / Fetch a byte from sample.
+Vol6:	mov	ch, cs:VolConv[eax]	; 4 / Fetch second byte to mix.
+;		       ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Fetch byte from seventh channel ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		       ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Acc7:	add	ebx, 11110000h		; 2 / Add the 32-bit accumulator.
+	adc	bx, 0			; 2 / Handle the possible carry.
+Len7:	cmp	bx, Offset DummyByte	; 2 / Whole instrument mixed?
+	jnb	EndOfIns7		; 3 / Reset pointers if yes.
+	mov	al, fs:[bx]		; 4 / Fetch a byte from sample.
+Vol7:	add	ch, cs:VolConv[eax]	; 6 / Fetch third byte to mix.
+;		       ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Fetch byte from eighth channel ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		       ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Acc8:	add	ebp, 11110000h		; 2 / Add the 32-bit accumulator.
+	adc	bp, 0			; 2 / Handle the possible carry.
+Len8:	cmp	bp, Offset Dummybyte	; 2 / Whole instrument mixed?
+	jnb	EndOfIns8		; 3 / Reset pointers if yes.
+	mov	al, gs:[bp]		; 4 / Fetch a byte from sample.
+Vol8:	add	cl, cs:VolConv[eax]	; 6 / CL = left, CH = right channel.
+;		     ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Place the mixed byte in the buffer ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		     ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+Done3:	add	cl, ch			; 2 / Mix the two channels together.
+MixPos2:add	cs:[edx+500], cl	; 7 / Add the mixed byte in buffer.
+	dec	dx			; 2 / Decrement the buffer index.
+	jnz	MixSamples2		; 9 / Go mix more bytes if not zero.
+
+	mov	cs:InstrPointer5, esi	; Save new offset to sample5.
+	mov	cs:InstrPointer6, edi	; Save new offset to sample6.
+	mov	cs:InstrPointer7, ebx	; Save new offset to sample7.
+	mov	cs:InstrPointer8, ebp	; Save new offset to sample8.
+	pop	ds ax			; Restore the regs needed to spare.
+	ret				; Return to the MixerParser.
+
+;		 ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ End of instrument handlers for each channel ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		 ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+EndOfIns5:
+	cmp	cs:ExtraLen5, 0 	; Is the length of sample over 64 kB?
+	jnz	LongInst5		; Jump if sample is over 64 kB.
+	cmp	cs:Repeat5, 1		; Instrument looped?
+	je	ResetLoop5		; Go reset the loop if it is.
+	mov	DPtr cs:Acc5+3, 0	; Zero out the accumulator.
+	mov	WPtr cs:Acc5, 1AEBh	; Self-modify a jump to the mixer.
+	jmp	Acc6			; Then go mix the next byte.
+ResetLoop5:
+	mov	si, cs:RepeatTo5	; Fetch the loop end offset.
+	mov	WPtr cs:Len5+2, si	; Set it to be end of the spl.
+	mov	si, cs:RepeatFrom5	; Fetch the loop start offset.
+	jmp	Acc5			; Mix the first channel.
+LongInst5:
+	mov	ax, ds			; Fetch the current sample segment.
+	add	ax, 1000h		; Point to the next 64 kB block.
+	mov	ds, ax			; Set the new value as CurSplSeg.
+	mov	cs:InstrumentSeg5, ax	; Save the fifth sample's new segment.
+	mov	ax, cs:ExtraLen5	; Fetch the length exceeding 64 kB.
+	mov	WPtr cs:Len5+2, ax	; Store the new sample length in mixer.
+	xor	ax, ax			; Clear the accumulator.
+	mov	si, ax			; DS:SI --> Next block of sample.
+	mov	cs:ExtraLen5, ax	; Zero the ExtraLen variable.
+	jmp	Acc5			; Go mix the first channel.
+	Align	4			; Dword-align for faster execution.
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+EndOfIns6:
+	cmp	cs:ExtraLen6, 0 	; Is the length of sample over 64 kB?
+	jnz	LongInst6		; Jump if sample is over 64 kB.
+	cmp	cs:Repeat6, 1		; Instrument looped?
+	je	ResetLoop6		; Go reset the loop if it is.
+	mov	DPtr cs:Acc6+3, 0	; Zero out the accumulator.
+	mov	WPtr cs:Acc6, 1BEBh	; Self-modify a jump to the mixer.
+	jmp	Acc7			; Then go mix the next byte.
+ResetLoop6:
+	mov	di, cs:RepeatTo6	; Fetch the loop end offset.
+	mov	WPtr cs:Len6+2, di	; Set it to be end of the spl.
+	mov	di, cs:RepeatFrom6	; Fetch the loop start offset.
+	jmp	Acc6			; Mix the sixth channel.
+LongInst6:
+	mov	ax, es			; Fetch the current sample segment.
+	add	ax, 1000h		; Point to the next 64 kB block.
+	mov	es, ax			; Set the new value as CurSplSeg.
+	mov	cs:InstrumentSeg6, ax	; Save the sixth sample's new segment.
+	mov	ax, cs:ExtraLen6	; Fetch the length exceeding 64 kB.
+	mov	WPtr cs:Len6+2, ax	; Store the new sample length in mixer.
+	xor	ax, ax			; Clear the accumulator.
+	mov	di, ax			; DS:SI --> Next block of sample.
+	mov	cs:ExtraLen6, ax	; Zero the ExtraLen variable.
+	jmp	Acc6			; Go mix the first channel.
+	Align	4			; Dword-align for faster execution.
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+EndOfIns7:
+	cmp	cs:ExtraLen7, 0 	; Is the length of sample over 64 kB?
+	jnz	LongInst7		; Jump if sample is over 64 kB.
+	cmp	cs:Repeat7, 1		; Instrument looped?
+	je	ResetLoop7		; Go reset the loop if it is.
+	mov	DPtr cs:Acc7+3, 0	; Zero out the accumulator.
+	mov	WPtr cs:Acc7, 1BEBh	; Self-modify a jump to the mixer.
+	jmp	Acc8			; Then go mix the next byte.
+ResetLoop7:
+	mov	bx, cs:RepeatTo7	; Fetch the loop end offset.
+	mov	WPtr cs:Len7+2, bx	; Set it to be end of the spl.
+	mov	bx, cs:RepeatFrom7	; Fetch the loop start offset.
+	jmp	Acc7			; Mix the seventh channel.
+LongInst7:
+	mov	ax, fs			; Fetch the current sample segment.
+	add	ax, 1000h		; Point to the next 64 kB block.
+	mov	fs, ax			; Set the new value as CurSplSeg.
+	mov	cs:InstrumentSeg7, ax	; Save the 7th sample's new segment.
+	mov	ax, cs:ExtraLen7	; Fetch the length exceeding 64 kB.
+	mov	WPtr cs:Len7+2, ax	; Store the new sample length in mixer.
+	xor	ax, ax			; Clear the accumulator.
+	mov	bx, ax			; DS:SI --> Next block of sample.
+	mov	cs:ExtraLen7, ax	; Zero the ExtraLen variable.
+	jmp	Acc7			; Go mix the first channel.
+	Align	4			; Dword-align for faster execution.
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+EndOfIns8:
+	cmp	cs:ExtraLen8, 0 	; Is the length of sample over 64 kB?
+	jnz	LongInst8		; Jump if sample is over 64 kB.
+	cmp	cs:Repeat8, 1		; Instrument looped?
+	je	ResetLoop8		; Go reset the loop if it is.
+	mov	DPtr cs:Acc8+3, 0	; Zero out the accumulator.
+	mov	WPtr cs:Acc8, 1CEBh	; Self-modify a jump to the mixer.
+	jmp	Done3			; Mixing completed.
+ResetLoop8:
+	mov	bp, cs:RepeatTo8	; Fetch the loop end offset.
+	mov	WPtr cs:Len8+2, bp	; Set it to be end of the spl.
+	mov	bp, cs:RepeatFrom8	; Fetch the loop start offset.
+	jmp	Acc8			; Mix the eighth channel.
+LongInst8:
+	mov	ax, gs			; Fetch the current sample segment.
+	add	ax, 1000h		; Point to the next 64 kB block.
+	mov	gs, ax			; Set the new value as CurSplSeg.
+	mov	cs:InstrumentSeg8, ax	; Save the 8th sample's new segment.
+	mov	ax, cs:ExtraLen8	; Fetch the length exceeding 64 kB.
+	mov	WPtr cs:Len8+2, ax	; Store the new sample length in mixer.
+	xor	ax, ax			; Clear the accumulator.
+	mov	bp, ax			; DS:SI --> Next block of sample.
+	mov	cs:ExtraLen8, ax	; Zero the ExtraLen variable.
+	jmp	Acc8			; Go mix the first channel.
+
+Mix8Channels	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º	       T H E   4 - C H A N N E L   P A T T E R N   P A R S E R	       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ParsePattern	Proc	Near
+
+	pushad				; Save all 32-bit registers.
+	push	es			; Save the Extra Segment.
+	push	ds			; Save the Data Segment.
+	Assume	DS:MusicSys		; Assume that DS points to MusicSys.
+	mov	ax, cs			; Set the AX to the CS to...
+	mov	ds, ax			; ...set the DS to Code Segment.
+	mov	es, ModuleSegment	; Set ES = Module Segment.
+	dec	PatternRow		; Decrement the rows-to-go counter.
+	jnz	GotOrder		; Skip orderfetch if nonzero.
+	call	OrderFetch		; Fetch next order.
+GotOrder:
+	mov	es, RowSegment		; Set the ES to point pattern.
+	mov	OrigRowSeg, es		; Store it for patternloop.
+	inc	RowSegment		; Point to the next row.
+	movzx	ebp, PatBaseOffs	; Fetch offset. ES:EBP = pattern row.
+
+	lea	si, Channel1Cmd 	; SI --> Channel #1 command info block.
+	call	ParseChannel		; Parse the first channel.
+
+	add	bp, 4			; Point to the next channel.
+	lea	si, Channel2Cmd 	; SI --> Channel #2 command info block.
+	call	ParseChannel		; Parse the second channel.
+
+	add	bp, 4			; Point to the next channel.
+	lea	si, Channel3Cmd 	; SI --> Channel #3 command info block.
+	call	ParseChannel		; Parse the third channel.
+
+	add	bp, 4			; Point to the next channel.
+	lea	si, Channel4Cmd 	; SI --> Channel #4 command info block.
+	call	ParseChannel		; Parse the fourth channel.
+
+	cmp	ModuleType, 3		; Is this an 8-channel module?
+	jne	ExitParser		; Exit the parser now if not.
+
+	add	bp, 4			; Point to the next channel.
+	lea	si, Channel5Cmd 	; SI --> Channel #5 command info block.
+	call	ParseChannel		; Parse the fifth channel.
+
+	add	bp, 4			; Point to the next channel.
+	lea	si, Channel6Cmd 	; SI --> Channel #6 command info block.
+	call	ParseChannel		; Parse the sixth channel.
+
+	add	bp, 4			; Point to the next channel.
+	lea	si, Channel7Cmd 	; SI --> Channel #7 command info block.
+	call	ParseChannel		; Parse the seventh channel.
+
+	add	bp, 4			; Point to the next channel.
+	lea	si, Channel8Cmd 	; SI --> Channel #8 command info block.
+	call	ParseChannel		; Parse the eighth channel.
+	inc	RowSegment		; Each row is 32 bytes = 2 paragraphs.
+
+ExitParser:
+	pop	ds			; Restore the Data Segment.
+	pop	es			; Restore the Extra Segment.
+	popad				; Restore all 32-bit regs.
+	ret				; Return.
+
+ParsePattern	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to the row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º RETURNS:	Nothing.						       º
+;º FUNCTION:	Parse one channel row.					       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ParseChannel	Proc	Near
+
+	call	GetInstrument		; Fetch instrument info.
+	js	NoNote			; Don't play anything if invalid instr.
+	jc	NoInstrument		; Jump if no instrument found.
+	mov	[si+TrueVol], dl	; Default volume = instrument volume.
+	mov	[si+InstrVol], dl	; Save the instrument volume.
+	mov	[si+FineTune], dh	; Store the FineTune value.
+NoInstrument:
+	lea	di, NoNote		; Return address if Tone Portamento.
+	call	ParseCommands		; Parse the possible commands.
+	call	GetAccumulator		; Fetch acc. for sample mixing.
+	jc	NoNote			; Jump if no note found.
+	mov	[si+CurPeriod], bx	; Save the current note period.
+	cmp	WPtr [si+CmdNumber], 32 ; NoteDelay active?
+	je	NoNote			; Don't play the note if yes.
+	mov	di, [si+CurAccPtr]	; Fetch pointer to the accumulator.
+	mov	[di], eax		; Self-modify accumulator in the mixer.
+	movzx	eax, SampleOffset	; Fetch the sample offset to set.
+	mov	di, [si+CurSplPtr]	; Fetch pointer to the Instrument Ptr.
+	mov	[di], eax		; Set the sample pointer to SampleOffs.
+
+	call	PlayInstrument		; Play the note.
+	setc	[si+Repeat]		; Repeat = 1 if looped instr.
+	mov	[si+RepeatTo], di	; Set the loop end offset.
+	mov	[si+RepeatFrom], cx	; Set the loop start offset.
+	mov	di, [si+CurSplPtr]	; Fetch pointer to the Instrument Ptr.
+	mov	[di+4], ax		; Store the sample's segment.
+	mov	di, [si+CurLenPtr]	; Fetch pointer to the sample length.
+	mov	[di], bx		; Self-modify the sample's length.
+	rol	ebx, 16 		; Out of registers; have to use EBX.H.
+	mov	[si+ExtraLen], bx	; Store the length exceeding 64k.
+	cmp	ReParseCommand, 1	; Fineslide on current row?
+	jne	NoNote			; Skip command parsing if not.
+	call	ParseCommands		; Execute the fineslide.
+NoNote:
+	call	GetVolume		; Fetch the volume from patterns.
+	jc	NoVolume		; No volume found if carry set.
+	mov	[si+TrueVol], al	; Save the volume.
+NoVolume:
+	push	bp			; Save the pattern pointer.
+	mov	bp, si			; Copy the Info Block pointer to BP.
+	mov	al, [si+TrueVol]	; Fetch the volume to use for the note.
+	call	MakeCurVol		; Self-modify the volume in the mixer.
+	pop	bp			; Restore the pattern pointer.
+	ret				; Return to the main pattern parser.
+
+ParseChannel	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º RETURNS:	EAX = New accumulator (EAX.H = Decimal part, AX = Int part).   º
+;º		BX = New note frequency in periods.			       º
+;º		CF = 1 if no note found.				       º
+;º FUNCTION:	Get the accumulator value for current note for sample mixing.  º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GetAccumulator	Proc	Near
+
+	cmp	ModuleType, 0		; Is this an STM?
+	jne	ModGetAcc		; Skip STM code if not.
+	xor	ax, ax			; Zero AX.
+	mov	cx, ax			; Zero CX.
+	mov	al, es:[bp]		; Fetch the note & octave byte.
+	or	al, al			; Test for a note.
+	js	NoNoteFound		; Don't parse if no note found.
+	mov	cl, es:[bp+1]		; Fetch the instrument byte.
+	shr	cl, 3			; Extract the instrument number.
+	jnz	YesInst 		; Skip if new instrument found.
+	mov	cl, [si+InstNum]	; Else use old instrument number.
+	inc	cx			; Increment the instrument number.
+YesInst:
+	dec	cx			; Decrement the instrument number.
+	imul	cx, 120 		; Multiply the CX by 120.
+	mov	bx, ax			; Duplicate the AX in the BX.
+	shr	bx, 4			; Set the octave's number in BX.
+	and	ax, 0Fh 		; Set the note's number in AX.
+	add	ax, ax			; Then multiply the AX by 2.
+	imul	bx, 24			; Multiply the BX by 24.
+	add	bx, ax			; Create the pointer.
+	add	bx, cx			; Adjust the BX.
+	mov	ax, PeriodTable[bx]	; AX = period value of the note.
+	mov	bx, ax			; Copy the period to BX.
+	push	bx			; Save the BX.
+	call	PeriodToAcc		; Calculate the accumulator value.
+	pop	bx			; Restore the BX.
+	clc				; Clear the carry flag.
+	ret				; Return to the pattern parser.
+NoNoteFound:
+	stc				; Set the carry; no note was found.
+	ret				; Return to the pattern parser.
+
+ModGetAcc:
+	mov	ah, es:[bp]		; Fetch a byte from the current row.
+	and	ah, 0Fh 		; Extract the lo nibble.
+	mov	al, es:[bp+1]		; Fetch the LSB.
+	or	ax, ax			; Set flags.
+	jz	NoNoteFound		; Jump if no note found.
+
+	cmp	ax, MinPeriod		; Is it beyond the table range?
+	jb	NoChange		; Skip the table lookup if yes.
+	cmp	ax, MaxPeriod		; Is it beyond the table range?
+	ja	NoChange		; Skip the table lookup if yes.
+
+	lea	bx, PeriodTable 	; Point the note period table.
+	mov	cx, NoteNum		; Set the number of notes to scan.
+	call	PeriodScan		; Search for the period in AX.
+	movzx	cx, [si+FineTune]	; Fetch the finetune value.
+	imul	cx, NoteNum		; Calculate relative offset.
+	add	cx, cx			; Convert it into a word offset.
+	add	bx, cx			; Add it to the original offset.
+	mov	ax, [bx]		; Fetch the new period value.
+	or	ax, ax			; Check the period value.
+	jz	NoNoteFound		; Jump if it's zero.
+
+NoChange:
+	mov	bx, ax			; Copy the period to BX.
+	push	bx			; Save the BX.
+	call	PeriodToAcc		; Calculate the accumulator value.
+	pop	bx			; Restore the BX.
+	clc				; Clear the carry flag.
+	ret				; Return to the pattern parser.
+
+GetAccumulator	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º RETURNS:	EAX = New accumulator (EAX.H = Decimal part, AX = Int part).   º
+;º		BX = New note frequency in periods.			       º
+;º		CF = 1 if no note found.				       º
+;º FUNCTION:	Get the destination note for the Tone Portamento command.      º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GetDestPeriod	Proc	Near
+
+	cmp	ModuleType, 0		; Is this an STM?
+	jne	ModGetDest		; Skip STM code if not.
+	xor	ax, ax			; Zero AX.
+	mov	cx, ax			; Zero CX.
+	mov	al, es:[bp]		; Fetch the note & octave byte.
+	or	al, al			; Test for a note.
+	js	NoDestFound		; Don't parse if no note found.
+	mov	cl, es:[bp+1]		; Fetch the instrument byte.
+	shr	cl, 3			; Extract the instrument number.
+	jnz	YesInstD		; Skip if new instrument found.
+	mov	cl, [si+InstNum]	; Else use old instrument number.
+	inc	cx			; Increment the instrument number.
+YesInstD:
+	dec	cx			; Decrement the instrument number.
+	imul	cx, 120 		; Multiply the CX by 120.
+	mov	bx, ax			; Duplicate the AX in the BX.
+	shr	bx, 4			; Set the octave's number in BX.
+	and	ax, 0Fh 		; Set the note's number in AX.
+	add	ax, ax			; Then multiply the AX by 2.
+	imul	bx, 24			; Multiply the BX by 24.
+	add	bx, ax			; Create the pointer.
+	add	bx, cx			; Adjust the BX.
+	mov	ax, PeriodTable[bx]	; AX = period value of the note.
+	mov	bx, ax			; Copy the period to BX.
+	push	bx			; Save the BX.
+	call	PeriodToAcc		; Calculate the accumulator value.
+	pop	bx			; Restore the BX.
+	clc				; Clear the carry flag.
+	ret				; Return to the pattern parser.
+NoDestFound:
+	stc				; Set the carry; no note was found.
+	ret				; Return to the pattern parser.
+
+ModGetDest:
+	mov	ah, es:[bp]		; Fetch a byte from the current row.
+	and	ah, 0Fh 		; Extract the lo nibble.
+	mov	al, es:[bp+1]		; Fetch the LSB.
+	or	ax, ax			; Set flags.
+	jz	NoDestFound		; Jump if no note found.
+
+	cmp	ax, MinPeriod		; Is it beyond the table range?
+	jb	DestNoChange		; Skip the table lookup if yes.
+	cmp	ax, MaxPeriod		; Is it beyond the table range?
+	ja	DestNoChange		; Skip the table lookup if yes.
+
+	movzx	bx, [si+FineTune]	; Fetch the finetune in BX.
+	imul	bx, NoteNum		; Calculate relative offset.
+	add	bx, bx			; Convert it into a word offset.
+	add	bx, Offset PeriodTable	; Final offset of the period table.
+	mov	cx, NoteNum		; Fetch the number of notes.
+	call	PeriodScan		; Search for the period in AX.
+
+	mov	al, [si+FineTune]	; Fetch the finetune.
+	test	al, 8			; Negative finetune?
+	jz	StpGossD		; Skip if not.
+	cmp	cx, NoteNum		; Is the note C-1?
+	je	StpGossD		; Skip if yes.
+	sub	bx, 2			; Use the previous note.
+StpGossD:
+	mov	ax, [bx]		; Fetch the new period value.
+	or	ax, ax			; Check the period value.
+	jz	NoDestFound		; Jump if it's zero.
+
+DestNoChange:
+	mov	bx, ax			; Copy the period to BX.
+	push	bx			; Save the BX.
+	call	PeriodToAcc		; Calculate the accumulator value.
+	pop	bx			; Restore the BX.
+	clc				; Clear the carry flag.
+	ret				; Return to the pattern parser.
+
+GetDestPeriod	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to the row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º RETURNS:	DL = Instrument Volume		CF = 1 if no instrument found  º
+;º		DH = Finetune Value		SF = 1 if invalid instrument   º
+;º FUNCTION:	Fetch instrument information.				       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GetInstrument	Proc	Near
+
+	push	es			; Store ES.
+	xor	ax, ax			; Clear AX.
+	cmp	ModuleType, al		; Is this an STM?
+	jne	ModGetInstr		; Skip STM code if not.
+	mov	al, es:[bp+1]		; Fetch a byte from the current row.
+	shr	al, 3			; Extract the instrument's # in AL.
+	mov	bx, 62			; BX = Offset of instr. headers.
+	mov	es, ModuleSegment	; Fetch segment of the module.
+	or	ax, ax			; Check if instrument number is zero.
+	jz	InstrNotFound		; Normal exit; no instrument found.
+	cmp	ax, 32			; Check that instr. number is legal.
+	jbe	InstrFound		; Jump if instrument # is valid.
+
+InvalidInstr:
+	xor	ax, ax			; Zero AX for setting the Sign Flag.
+	dec	ax			; AX = -1; Sign Flag is now set.
+	pop	es			; Then restore ES before exiting.
+	stc				; Set the Carry flag, too.
+	ret				; Return with SF=1 and CF=1.
+
+InstrNotFound:
+	xor	ax, ax			; Clear the Sign Flag.
+	pop	es			; Restore the ES.
+	stc				; Set the carry flag.
+	ret				; Then return with SF=0 and CF=1.
+
+ModGetInstr:
+	mov	al, es:[bp]		; Fetch a byte from current row.
+	and	al, 0F0h		; Extract the hi nibble.
+	mov	bl, es:[bp+2]		; Fetch another byte.
+	shr	bl, 4			; Extract the hi nibble to lo nibble.
+	or	al, bl			; Now AL = instr. number.
+	mov	bx, cs			; BX = the code segment.
+	mov	es, bx			; Set it to the ES.
+	lea	bx, InstrTable+14	; BX = Offset of instr. table.
+	or	ax, ax			; Check if instrument number is zero.
+	jz	InstrNotFound		; Normal exit; no instrument found.
+	cmp	ax, 32			; Check that instr. number is legal.
+	ja	InvalidInstr		; Jump if instrument # is invalid.
+InstrFound:
+	push	si			; Save the info block pointer.
+	dec	ax			; Adjust the instrument number a bit.
+	mov	[si+InstNum], al	; Save the instrument number.
+	mov	si, ax			; Copy the instrument number to SI.
+	shl	si, 5			; Multiply by 32.
+	add	si, bx			; Now ES:SI --> Instrument info.
+	mov	dl, es:[si+8]		; Fetch instrument volume.
+	xor	dh, dh			; Use finetune 0.
+	cmp	ModuleType, 0		; Is this an STM?
+	je	NoFTune 		; Skip if yes.
+	mov	dh, es:[si+10]		; Otherwise get the finetune.
+NoFTune:
+	xor	ax, ax			; Clear the Sign Flag.
+	pop	si			; Restore the info block pointer.
+	pop	es			; Restore ES.
+	clc				; Instrument found; clear the carry.
+	ret				; Return with SF=0 and CF=0.
+
+GetInstrument	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DS:SI = Pointer to current channel's Command Info Block.       º
+;º RETURNS:	CF = 1 if looped instrument   BX = Instrument Length	       º
+;º		AX = Instrument Seg Address   DI = Loop End Offset	       º
+;º		CX = Loop Start Offset	      EBX.H = # of bytes exceeding 64k º
+;º FUNCTION:	Fetch more instrument information.			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+PlayInstrument	Proc	Near
+
+	push	si			; Save the info block pointer.
+	push	es			; Store ES.
+	mov	ax, cs			; AX = the code segment.
+	mov	es, ax			; Set it to the ES.
+	lea	ebx, InstrTable+14	; Clear EBX.H & fetch table address.
+	cmp	ModuleType, 0		; Is this an STM?
+	jne	PlayInstr		; Skip the STM code if not.
+	mov	es, ModuleSegment	; Fetch segment of the module.
+	mov	bx, 62			; BX = Offset of instr. headers.
+PlayInstr:
+	movzx	si, [si+InstNum]	; Fetch the instrument number.
+	shl	si, 5			; Multiply by 32.
+	add	si, bx			; Now ES:SI --> Instrument info.
+	mov	ax, ModuleSegment	; Fetch segment address of the module.
+	add	ax, es:[si]		; Add segment address of instrument.
+	mov	bx, es:[si+2]		; Fetch length of the instrument.
+	cmp	ModuleType, 0		; Is this an STM?
+	je	NoExtraLen		; Skip MOD code if it is.
+	rol	ebx, 16 		; Out of registers; have to use EBX.H.
+	mov	bx, es:[si-10]		; The length exceeding 64k boundary.
+	rol	ebx, 16 		; Out of 16-bit regs; have to use EBX.
+NoExtraLen:
+	mov	cx, es:[si+4]		; Fetch "Loop Start"
+	mov	di, es:[si+6]		; Fetch "Loop End"
+	clc				; Default = Instrument not looped.
+	inc	di			; Test if Loop End = 0FFFFh.
+	je	NoInstrLoop		; Jump if Loop End = 0FFFFh.
+	dec	di			; Test if Loop End = 0.
+	je	NoInstrLoop		; Jump if Loop End = 0.
+	stc				; Set Carry; instrument is looped.
+NoInstrLoop:
+	pop	es			; Restore ES.
+	pop	si			; Restore the info block pointer.
+	ret				; Return to the ParseChannel procedure.
+
+PlayInstrument	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º RETURNS:	AL = Volume for current note.				       º
+;º		CF = 1 if no volume specified.				       º
+;º FUNCTION:	Fetch the volume for current note (STM only).		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GetVolume	Proc	Near
+
+	mov	ax, es:[bp+1]		; Fetch byte #1 in AL & byte #2 in AH.
+	and	al, 7			; Clear unneeded bits of Byte1.
+	shr	ah, 1			; Discard the lowmost bit of Byte2.
+	add	al, ah			; Calculate the new volume.
+	cmp	al, 64			; Is it in range [0..64]?
+	ja	NoVolThisTime		; Invalid volume if not; return.
+	cmp	ModuleType, 0		; Is this an STM or MOD file?
+	jne	NoVolThisTime		; Go set the carry flag if MOD.
+	clc				; Clear the carry flag.
+	ret				; Return to the pattern parser.
+NoVolThisTime:
+	stc				; Error; set the carry flag.
+	ret				; Return to the pattern parser.
+
+GetVolume	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º RETURNS:	RowSegment = Segment of next pattern to play.		       º
+;º FUNCTION:	Point RowSegment to the pattern specified by the order-list.   º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+OrderFetch	Proc	Near
+
+	mov	PatternRow, 64		; Reset the rows-to-go counter.
+	mov	al, 65			; AL = the default loop point.
+	mov	LoopPatRow1, al 	; Set the default loop point.
+	mov	LoopPatRow2, al 	; Set the default loop point.
+	mov	LoopPatRow3, al 	; Set the default loop point.
+	mov	LoopPatRow4, al 	; Set the default loop point.
+	mov	LoopPatRow5, al 	; Set the default loop point.
+	mov	LoopPatRow6, al 	; Set the default loop point.
+	mov	LoopPatRow7, al 	; Set the default loop point.
+	mov	LoopPatRow8, al 	; Set the default loop point.
+	mov	bx, NextOrder		; Point the next order byte.
+	cmp	bx, LastOrder		; Time to wrap the song?
+	jae	LoopInSong		; Skip if yes.
+	mov	al, es:[bx]		; Fetch it.
+	inc	bx			; Increment the index.
+	jmp	NoLoopInSong		; Skip the song loop handler.
+LoopInSong:
+	mov	bx, BaseOrder		; Else wrap the pattern pointer.
+	mov	al, es:[bx]		; And fetch the first pattern number.
+	inc	bx			; Increment the pointer.
+NoLoopInSong:
+	mov	NextOrder, bx		; Save it.
+	xor	ah, ah			; Clear the upper 8 bits of the AX.
+	mov	cl, 6			; Set the default shift count in CL.
+	cmp	ModuleType, 3		; 8-channel ProTracker module?
+	jne	$+4			; Skip the next instruction if not.
+	inc	cl			; Increment the shift count.
+	shl	ax, cl			; Multiply AX by pattern size.
+	add	ax, ModuleSegment	; Add the module's segment.
+	add	ax, PatBaseSegment	; And the relative pattern base seg.
+	mov	RowSegment, ax		; Store the new pattern row's segment.
+	mov	LoopRowSeg1, ax 	; Store the default loop row segment.
+	mov	LoopRowSeg2, ax 	; Store the default loop row segment.
+	mov	LoopRowSeg3, ax 	; Store the default loop row segment.
+	mov	LoopRowSeg4, ax 	; Store the default loop row segment.
+	mov	LoopRowSeg5, ax 	; Store the default loop row segment.
+	mov	LoopRowSeg6, ax 	; Store the default loop row segment.
+	mov	LoopRowSeg7, ax 	; Store the default loop row segment.
+	mov	LoopRowSeg8, ax 	; Store the default loop row segment.
+	ret				; Return to the Pattern Parser.
+
+OrderFetch	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AX = Period value to search from the PeriodTable.	       º
+;º		BX = Address of the period table to search through.	       º
+;º		CX = Number of entries to search (number of notes).	       º
+;º RETURNS:	BX = Pointer to the correct note in the period table.	       º
+;º FUNCTION:	Searches the PeriodTable for a given period value.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+PeriodScan	Proc	Near
+
+	cmp	ax, [bx]		; Compare the next value.
+	jae	NoteFound		; Jump if the right value is found.
+	add	bx, 2			; Increment the index.
+	loop	PeriodScan		; Loop until correct note found.
+	sub	bx, 2			; Otherwise use the last possible note.
+NoteFound:
+	ret				; Return to the caller.
+
+PeriodScan	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AX = Note frequency in periods. 			       º
+;º RETURNS:	EAX = Accumulator value in 16.16 format.		       º
+;º FUNCTION:	Calculates accumulator value from the period value.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+PeriodToAcc	Proc	Near
+
+	movzx	ebx, ax 		; Copy the period value to EBX.
+	mov	eax, 428*8448		; EAX = Period*Hertz value.
+	xor	edx, edx		; Clear the EDX.
+	div	ebx			; Result: EAX = Note freq. in Hz.
+	mov	dx, ax			; Copy the integer part to DX.
+	xor	ax, ax			; Clear the decimal part.
+	mov	bx, PlayFreq		; Fetch the playing frequency.
+	shl	ebx, 16 		; Shift the integer part up.
+	call	Divide			; Divide DX:AX by EBX.
+	shl	eax, 16 		; Shift the decimal part up.
+	mov	ax, dx			; Copy the integer part to AX.
+	ret				; Return.
+
+PeriodToAcc	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AL = New volume (0-64). 				       º
+;º		DS:BP = Pointer to current channel's Command Info Block.       º
+;º FUNCTION:	Creates a volume table addr and self-modifies it to the mixer. º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MakeCurVol	Proc	Near
+
+	sub	al, MasterVolume	; Subtract the master volume.
+	jnc	$+4			; Skip if positive.
+	xor	al, al			; Clear the AL.
+	shl	ax, 8			; Relative volume table addr. in AX.
+	add	ax, Offset VolConv	; Absolute volume table addr. in AX.
+	mov	di, ds:[bp+CurVolPtr]	; Fetch pointer to the sample volume.
+	mov	[di], ax		; Set the Current Volume.
+	ret				; Return.
+
+MakeCurVol	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º FUNCTION:	Parse the possible effect commands.			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ParseCommands	Proc	Near
+
+	xor	ax, ax			; Zero the AX for clearing variables.
+	mov	SampleOffset, ax	; Assume no new sample offset.
+	mov	ReParseCommand, al	; Execute command normally.
+	mov	bl, es:[bp+2]		; Fetch the command byte in BL.
+	and	bx, 0Fh 		; Extract the command number.
+	add	bx, bx			; Make it a word index to the table.
+	cmp	ModuleType, al		; Is this an STM (ModuleType=0)?
+	jne	ModParseCmd		; Skip STM code if not.
+	mov	[si+CmdNumber], ax	; Assume no command.
+	call	StmCmdParsers[bx]	; Call correct command initializer.
+	ret				; Return.
+ModParseCmd:
+	mov	WPtr [si+CmdNumber], 16 ; Assume no command.
+	call	ModCmdParsers[bx]	; Call correct command initializer.
+	ret				; Return.
+
+ParseCommands	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º FUNCTION:	Parse the possible commands.				       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ParsePTCommands Proc	Near
+
+	mov	bl, es:[bp+3]		; Fetch the command info byte in BL.
+	and	bx, 00F0h		; Extract the E-command's number.
+	shr	bx, 3			; Make it a word index to the table.
+	call	PT_Parsers[bx]		; Call correct E-command initializer.
+	ret				; Return.
+
+ParsePTCommands EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	None							       º
+;º OUTPUT:	None							       º
+;º FUNCTION:	Calls the needed command handlers for each channel.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+HandleCommands	Proc	Near
+
+	pushad				; Save all 32-bit registers.
+	push	ds			; Save the Data Segment.
+	mov	ax, cs			; Set the DS to point to...
+	mov	ds, ax			; ...the Code Segment.
+	inc	TickCounter		; Increment the current tick counter.
+	mov	ax, TickCounter 	; Fetch the tick counter in AL.
+	cmp	al, SongSpeed		; Does it match the current speed?
+	jb	NoNewNote		; Just do the F/X if not yet.
+	mov	TickCounter, 0		; Zero out the current tick counter.
+	dec	PattDelayCnt		; Decrement the pattern delay count.
+	jnz	NoNewNote		; Do not fetch note if count not zero.
+	mov	PattDelayCnt, 1 	; Ensure that delay count doesn't wrap.
+	call	ParsePattern		; Otherwise parse new pattern row.
+	jmp	ExitCmdHandler		; Do not handle commands this time.
+
+NoNewNote:
+	lea	bp, Channel1Cmd 	; BP --> Channel #1 command info block.
+	mov	bx, ds:[bp+CmdNumber]	; BX = command number * 2
+	add	bx, CmdHandlers 	; Add offset of the call table.
+	call	StmCmdHandlers[bx]	; Call command handler routine.
+
+	lea	bp, Channel2Cmd 	; BP --> Channel #2 Command Info Block.
+	mov	bx, ds:[bp+CmdNumber]	; BX = command number * 2.
+	add	bx, CmdHandlers 	; Add offset of the call table.
+	call	StmCmdHandlers[bx]	; Call command handler routine.
+
+	lea	bp, Channel3Cmd 	; BP --> Channel #3 Command Info Block.
+	mov	bx, ds:[bp+CmdNumber]	; BX = command number * 2.
+	add	bx, CmdHandlers 	; Add offset of the call table.
+	call	StmCmdHandlers[bx]	; Call command handler routine.
+
+	lea	bp, Channel4Cmd 	; BP --> Channel #4 Command Info Block.
+	mov	bx, ds:[bp+CmdNumber]	; BX = command number * 2.
+	add	bx, CmdHandlers 	; Add offset of the call table.
+	call	StmCmdHandlers[bx]	; Call command handler routine.
+
+	cmp	ModuleType, 3		; Is this an 8-channel module?
+	jne	ExitCmdHandler		; Exit the command handler now if not.
+
+	lea	bp, Channel5Cmd 	; BP --> Channel #5 command info block.
+	mov	bx, ds:[bp+CmdNumber]	; BX = command number * 2
+	add	bx, CmdHandlers 	; Add offset of the call table.
+	call	StmCmdHandlers[bx]	; Call command handler routine.
+
+	lea	bp, Channel6Cmd 	; BP --> Channel #6 Command Info Block.
+	mov	bx, ds:[bp+CmdNumber]	; BX = command number * 2.
+	add	bx, CmdHandlers 	; Add offset of the call table.
+	call	StmCmdHandlers[bx]	; Call command handler routine.
+
+	lea	bp, Channel7Cmd 	; BP --> Channel #7 Command Info Block.
+	mov	bx, ds:[bp+CmdNumber]	; BX = command number * 2.
+	add	bx, CmdHandlers 	; Add offset of the call table.
+	call	StmCmdHandlers[bx]	; Call command handler routine.
+
+	lea	bp, Channel8Cmd 	; BP --> Channel #8 Command Info Block.
+	mov	bx, ds:[bp+CmdNumber]	; BX = command number * 2.
+	add	bx, CmdHandlers 	; Add offset of the call table.
+	call	StmCmdHandlers[bx]	; Call command handler routine.
+
+ExitCmdHandler:
+	pop	ds			; Restore the Data Segment.
+	popad				; Restore all 32-bit regs.
+	ret				; Return to the sample mixing loop.
+
+HandleCommands	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º	     S I N G L E - P A S S   C O M M A N D   H A N D L E R S	       º
+;º									       º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º Information about all single-pass command handlers in general:	       º
+;º									       º
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º FUNCTION:	Handle the possible single-pass commands for each channel.     º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SetTempo	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the song speed to AL.
+	or	al, al			; Is it a "Stop Song" request?
+	jz	Dummy			; No new speed for song if yes.
+	cmp	ModuleType, 0		; Is this a Scream Tracker module?
+	jne	NotSTMspeed		; Skip if this is a MOD.
+	shr	al, 4			; Divide the STM speed by 16.
+	mov	SongSpeed, al		; Then store it for later use.
+	ret				; And return to the pattern parser.
+
+NotSTMspeed:				; The module file is not an STM.
+	cmp	al, 20h 		; Is it a normal pattern tick counter?
+	ja	AbnormalTempo		; If not, handle the tempo differently.
+	mov	SongSpeed, al		; Otherwise save the speed of the song.
+	mov	TickCounter, 0		; Zero out the tick counter.
+	ret				; Return to the pattern parser.
+
+AbnormalTempo:				; Song Speed ò 20h --> abnormal tempo.
+	cmp	ModuleType, 1		; Could this be a ProTracker module?
+        je      TempoBPM                ; If so, this must be a BPM tempo.
+        cmp     ModuleType, 3           ; Is this an 6/8-channel FT module?
+        jae     TempoBPM                ; If so, this must be a BPM tempo.
+	cmp	ModuleType, 2		; Is this a 15-instrument MOD file?
+	je	Dummy			; Then the speed is invalid; quit.
+	shr	al, 4			; Otherwise discard the low nibble.
+	jmp	NotSTMspeed		; And go handle the speed normally.
+
+TempoBPM:				; Calculate the new command counter.
+	cmp	TempoMode, 1		; Are the PT tempo settings disabled?
+	je	Dummy			; If so, do not set new song speed.
+	movzx	ebx, al 		; Copy the BPM value to EBX.
+	movzx	eax, PlayFreq		; Fetch the playing frequency in EAX.
+	imul	ebx, 6*4		; EBX = # of CmdCounter ticks / minute.
+	imul	eax, 60 		; EAX = # of bytes output per minute.
+	xor	edx, edx		; Zero the upper doubleword.
+	div	ebx			; AX = The final command counter.
+	mov	SlideOrg, ax		; Store the command counter.
+	ret				; Return to the pattern parser.
+
+SetTempo	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetVolume	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	cmp	al, 40h 		; Is the value beyond range?
+	jbe	$+4			; Skip next instruction if not.
+	mov	al, 40h 		; Otherwise set the maximum volume.
+	mov	[si+TrueVol], al	; Store the volume.
+	ret				; Return.
+
+SetVolume	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+PositionJump	Proc	Near
+
+	xor	bx, bx			; Zero BX.
+	mov	bl, es:[bp+3]		; Fetch the info byte.
+	add	bx, BaseOrder		; Add the base address.
+	mov	NextOrder, bx		; Set the new order byte.
+	mov	PatternRow, 1		; Fetch next order on next pass.
+	ret				; Return.
+
+PositionJump	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+BreakPattern	Proc	Near
+
+	mov	PatternRow, 1		; Fetch next order on next pass.
+	ret				; Return to command parser.
+
+BreakPattern	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetSampleOffs	Proc	Near
+
+	xor	eax, eax		; Ensure that upper half of EAX = 0.
+	mov	al, es:[bp+3]		; Fetch (SampleOffset / 256) in AL.
+	shl	ax, 8			; Offset from which to start playing.
+	mov	di, [si+CurSplPtr]	; Fetch pointer to the Instrument Ptr.
+	mov	[di], eax		; Set the sample pointer to SampleOffs.
+	mov	SampleOffset, ax	; Store the SampleOffset for later use.
+	ret				; Return.
+
+SetSampleOffs	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FineSlideUp	Proc	Near
+
+	push	si			; Save the command info block pointer.
+	push	bp			; Save the pattern pointer.
+	mov	al, es:[bp+3]		; Fetch the command info byte in AL.
+	and	al, 0Fh 		; Extract the real command info.
+	mov	[si+CmdInfo], al	; Set the Command Info byte.
+	mov	bp, si			; Copy the pointer to the BP.
+	call	PortamentoUp		; Call the Portamento Up routine.
+	pop	bp			; Restore the pattern pointer.
+	pop	si			; Restore the cmd info block pointer.
+	mov	ReParseCommand, 1	; Slide again if note changed.
+	ret				; Return to the PT-command parser.
+
+FineSlideUp	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FineSlideDown	Proc	Near
+
+	push	si			; Save the command info block pointer.
+	push	bp			; Save the pattern pointer.
+	mov	al, es:[bp+3]		; Fetch the command info byte in AL.
+	and	al, 0Fh 		; Extract the real command info.
+	mov	[si+CmdInfo], al	; Set the Command Info byte.
+	mov	bp, si			; Copy the pointer to the BP.
+	call	PortamentoDown		; Call the Portamento Down routine.
+	pop	bp			; Restore the pattern pointer.
+	pop	si			; Restore the cmd info block pointer.
+	mov	ReParseCommand, 1	; Slide again if note changed.
+	ret				; Return to the PT-command parser.
+
+FineSlideDown	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+PatternLoop	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	ax, 0Fh 		; Extract the real command info.
+	jz	SetLoop 		; Set loop if command info = 0.
+	cmp	BPtr [si+LoopCount], 0	; Test if loop already set.
+	je	SetCount		; Set the loop count if not.
+	dec	BPtr [si+LoopCount]	; Decrement the loop counter.
+	jnz	JmpLoop 		; Loop if zero not reached yet.
+	ret				; Return to the PT-command parser.
+
+SetCount:
+	mov	[si+LoopCount], al	; Set the pattern loop counter.
+
+JmpLoop:
+	mov	al, [si+LoopPatRow]	; Fetch the loop pattern row.
+	mov	PatternRow, ax		; Set the pattern row.
+	mov	ax, [si+LoopRowSeg]	; Fetch the loop row segment.
+	cmp	ModuleType, 3		; Is this an 8-channel module?
+	jne	NormSeg 		; Skip if not.
+	dec	ax			; Decrement - ParsePattern will inc it!
+NormSeg:
+	mov	RowSegment, ax		; Set the row segment.
+	ret				; Return to the PT-command parser.
+
+SetLoop:
+	mov	ax, PatternRow		; Fetch the pattern row.
+	inc	ax			; Back to the current row.
+	mov	[si+LoopPatRow], al	; Set the loop pattern row.
+	mov	ax, OrigRowSeg		; Fetch the row segment.
+	mov	[si+LoopRowSeg], ax	; Set the loop row segment.
+	ret				; Return to the PT-command parser.
+
+PatternLoop	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetGlissControl Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the real command info.
+	and	BPtr [si+GlisFunk], 0F0h; Zero the glissando control nibble.
+	or	[si+GlisFunk], al	; Set the new glissando control nibble.
+	ret				; Return to the PT-command parser.
+
+SetGlissControl EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetVibControl	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the real command info.
+	and	BPtr [si+WaveCtrl], 0F0h; Zero the vibrato control nibble.
+	or	[si+WaveCtrl], al	; Set the new vibrato control nibble.
+	ret				; Return to the PT-command parser.
+
+SetVibControl	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetFineTune	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the real command info.
+	mov	[si+FineTune], al	; Set the new finetune value.
+	ret				; Return to the PT-command parser.
+
+SetFineTune	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetTreControl	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	shl	al, 4			; Rotate the command to hi nibble.
+	and	BPtr [si+WaveCtrl], 0Fh ; Zero the tremolo control nibble.
+	or	[si+WaveCtrl], al	; Set the new tremolo control nibble.
+	ret				; Return to the PT-command parser.
+
+SetTreControl	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FineVolSldUp	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the amount to slide up.
+	mov	bl, al			; Move the Slide Count to BL.
+	mov	al, [si+TrueVol]	; Fetch current volume.
+	add	al, bl			; Slide it up.
+	cmp	al, 64			; Maximum volume reached yet?
+	jbe	$+4			; Volume = 64 if AL > 64.
+	mov	al, 64			; Set the volume to 40h (maximum).
+	mov	[si+TrueVol], al	; Store the new volume.
+	ret				; Return to the PT-command parser.
+
+FineVolSldUp	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FineVolSldDown	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the amount to slide down.
+	mov	bl, al			; Move the Slide Count to BL.
+	mov	al, [si+TrueVol]	; Fetch current volume.
+	sub	al, bl			; Slide it down.
+	jnb	$+4			; Volume = 0 if AL < 0.
+	xor	al, al			; Zero volume.
+	mov	[si+TrueVol], al	; Store the new volume.
+	ret				; Return to the PT-command parser.
+
+FineVolSldDown	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+PatternDelay	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the amount to delay.
+	inc	al			; Round up the delay count.
+	add	PattDelayCnt, al	; Store the delay count.
+	ret				; Return to the PT-command parser.
+
+PatternDelay	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Dummy		Proc	Near
+
+	ret				; Dummy procedure; return to caller.
+
+Dummy		EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º     M U L T I P L E - P A S S   C O M M A N D   I N I T I A L I Z E R S     º
+;º									       º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º Information about all command initializers in general:		       º
+;º									       º
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º		DI = Return address (for TonePortamento initializer only).     º
+;º FUNCTION:	Init the possible multiple-pass commands for each channel.     º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SlideCommands	Proc	Near
+
+	xor	ax, ax			; Zero AX.
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	mov	[si+CmdInfo], ax	; Save the command info byte.
+	mov	[si+CmdNumber], bx	; Store the command number.
+	ret				; Return to the command initializer.
+
+SlideCommands	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitTonePort	Proc	Near
+
+	xor	ax, ax			; Zero AX.
+	or	al, es:[bp+3]		; Fetch the info byte and test if zero.
+	jz	InitTone&VSlide 	; Continue with old parameters if AL=0.
+	mov	[si+PortInfo], ax	; Save the portamento info byte.
+InitTone&VSlide:
+	xor	ax, ax			; Zero AX.
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	mov	[si+CmdInfo], ax	; Save the command info byte for T&S.
+	mov	[si+CmdNumber], bx	; Store the command number.
+	call	GetDestPeriod		; Get the destination note.
+	jc	NoNewDestPeriod 	; Skip if no new DestPeriod defined.
+	mov	[si+DestPeriod], bx	; Store the destination note's period.
+	mov	ax, [si+CurPeriod]	; Fetch the current note.
+	cmp	ax, bx			; Portamento Up or Portamento Down?
+	seta	[si+TPortaDirec]	; Set the portamento direction flag.
+NoNewDestPeriod:
+	pop	eax			; Discard two previous RET addresses.
+	jmp	di			; Jump to given return address.
+
+InitTonePort	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitVibrato	Proc	Near
+
+	mov	[si+CmdNumber], bx	; Store the command number.
+	xor	dx, dx			; Zero the DX for testing info byte.
+	or	dh, es:[bp+3]		; Fetch the info byte and test if zero.
+	jz	Dummy			; Continue with old parameters if DH=0.
+	mov	ax, [si+VibratoInfo]	; Fetch the vibrato info byte in AX.
+	mov	dl, dh			; Copy the info byte to DL.
+	and	dl, 0Fh 		; Test the lo nibble.
+	jz	VibSkip 		; Continue with old parameter if zero.
+	and	al, 0F0h		; Otherwise zero the lo nibble.
+	or	al, dl			; Insert the info byte into it.
+VibSkip:
+	mov	dl, dh			; Copy the info byte to DL.
+	and	dl, 0F0h		; Test the hi nibble.
+	jz	VibSkip2		; Continue with old parameter if zero.
+	and	al, 0Fh 		; Otherwise zero the hi nibble.
+	or	al, dl			; Insert the info byte into it.
+VibSkip2:
+	mov	[si+VibratoInfo], ax	; Save the final vibrato info byte.
+	ret				; Return to the command initializer.
+
+InitVibrato	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitTremolo	Proc	Near
+
+	mov	[si+CmdNumber], bx	; Store the command number.
+	xor	dx, dx			; Zero the DX for testing info byte.
+	or	dh, es:[bp+3]		; Fetch the info byte and test if zero.
+	jz	Dummy			; Continue with old parameters if DH=0.
+	mov	ax, [si+TremoloInfo]	; Fetch the tremolo info byte in AX.
+	mov	dl, dh			; Copy the info byte to DL.
+	and	dl, 0Fh 		; Test the lo nibble.
+	jz	TreSkip 		; Continue with old parameter if zero.
+	and	al, 0F0h		; Zero the lo nibble.
+	or	al, dl			; Copy the info byte lo nibble.
+TreSkip:
+	mov	dl, dh			; Copy the info byte to DL.
+	and	dl, 0F0h		; Test the hi nibble.
+	jz	TreSkip2		; Continue with old parameter if zero.
+	and	al, 0Fh 		; Otherwise zero the hi nibble.
+	or	al, dl			; Insert the info byte into it.
+TreSkip2:
+	mov	[si+TremoloInfo], ax	; Save the final tremolo info byte.
+	ret				; Return to the command initializer.
+
+InitTremolo	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitRetrigNote	Proc	Near
+
+	xor	ax, ax			; Zero AX.
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	mov	[si+CmdInfo], ax	; Save the command info byte.
+	mov	WPtr [si+CmdNumber], 28 ; Store the command number (0Eh*2).
+	ret				; Return to the command initializer.
+
+InitRetrigNote	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitNoteCut	Proc	Near
+
+	xor	ax, ax			; Zero AX.
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	mov	[si+CmdInfo], ax	; Save the command info byte.
+	mov	WPtr [si+CmdNumber], 30 ; Store the command number (0Fh*2).
+	ret				; Return to the command initializer.
+
+InitNoteCut	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitNoteDelay	Proc	Near
+
+	xor	ax, ax			; Zero AX.
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	test	al, 0Fh 		; Is the tick counter zero?
+	jz	Dummy			; No NoteDelay if count is zero.
+	mov	[si+CmdInfo], ax	; Save the command info byte.
+	mov	WPtr [si+CmdNumber], 32 ; Store the command number (10h*2).
+	ret				; Return to the command initializer.
+
+InitNoteDelay	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º	    M U L T I P L E - P A S S	C O M M A N D	H A N D L E R S        º
+;º									       º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º Information about all command handlers in general:			       º
+;º									       º
+;º INPUT:	DS:BP = Pointer to current channel's Command Info Block.       º
+;º FUNCTION:	Handle the possible multiple-pass commands for each channel.   º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+VolumeSlide	Proc	Near
+
+	mov	bx, ds:[bp+CmdInfo]	; Fetch the command info byte in BX.
+	mov	al, ds:[bp+TrueVol]	; Fetch current volume.
+	test	bl, 0F0h		; Hi nibble set?
+	jnz	SlideVolUp		; Slide up if yes.
+	and	bl, 0Fh 		; Extract the low nibble.
+	sub	al, bl			; Slide it down.
+	jnb	SaveNewVolume		; Volume = 0 if AL < 0.
+	xor	al, al			; Zero volume.
+
+SaveNewVolume:
+	mov	ds:[bp+TrueVol], al	; Store the new volume.
+	call	MakeCurVol		; Create the volume table address.
+	ret				; Return.
+
+SlideVolUp:
+	shr	bl, 4			; Rotate the slide count.
+	add	al, bl			; Slide it up.
+	cmp	al, 64			; AL too big?
+	jbe	SaveNewVolume		; Go save new volume if not.
+	mov	al, 64			; Set Volume to 40h (maximum).
+	jmp	SaveNewVolume		; Go save the new volume.
+
+VolumeSlide	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+PortamentoDown	Proc	Near
+
+	mov	si, ds:[bp+CurAccPtr]	; DS:SI --> Current note's accumulator.
+	mov	ax, ds:[bp+CurPeriod]	; AX = Current note's period.
+	add	ax, ds:[bp+CmdInfo]	; Increment the period.
+	cmp	ax, MaxPeriod		; Period value out of bounds?
+	jb	$+5			; Skip next line if period in range.
+	mov	ax, MaxPeriod		; Period 856 = lowest possible note.
+	mov	ds:[bp+CurPeriod], ax	; Save the current period value.
+	call	PeriodToAcc		; Calculate the new accumulator.
+	mov	[si], eax		; Save the updated accumulator.
+	ret				; Return to the Main Command Handler.
+
+PortamentoDown	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+PortamentoUp	Proc	Near
+
+	mov	si, ds:[bp+CurAccPtr]	; DS:SI --> Current note's accumulator.
+	mov	ax, ds:[bp+CurPeriod]	; AX = Current note's period.
+	sub	ax, ds:[bp+CmdInfo]	; Decrement the period.
+	cmp	ax, MinPeriod		; Period value out of bounds?
+	jge	$+5			; Skip next line if period in range.
+	mov	ax, MinPeriod		; Period 113 = highest possible note.
+	mov	ds:[bp+CurPeriod], ax	; Save the current period value.
+	call	PeriodToAcc		; Calculate the new accumulator.
+	mov	[si], eax		; Save the updated accumulator.
+	ret				; Return to the Main Command Handler.
+
+PortamentoUp	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+TonePortamento	Proc	Near
+
+	mov	ax, ds:[bp+PortInfo]	; Fetch the portamento info byte in AX.
+	mov	si, ds:[bp+CurAccPtr]	; DS:SI --> Current note's accumulator.
+	mov	cx, ds:[bp+CurPeriod]	; Fetch the period of current note.
+	mov	dx, ds:[bp+DestPeriod]	; DX = Destination note's period.
+	or	dx, dx			; Is the destination period zero?
+	jz	NoPortamento		; Do nothing if DestPeriod = 0.
+	cmp	cx, dx			; Portamento Up or Portamento Down?
+	je	NoPortamento		; IF CurFreq = DestFreq THEN NoPort
+	cmp BPtr ds:[bp+TPortaDirec], 1 ; Which way should we slide the note?
+	je	PortUp			; Jump if we should slide it upward.
+PortDown:
+	add	cx, ax			; CX = New period of cur. note.
+	cmp	cx, dx			; CurFreq ó DestFreq?
+	jle	NoPortamento		; Jump if not yet.
+	mov	cx, dx			; If yes, then CurFreq = DestFreq.
+	mov WPtr ds:[bp+DestPeriod], 0	; Clear the destination period.
+	jmp	NoPortamento		; Go save the result.
+PortUp:
+	sub	cx, ax			; CX = New period of cur. note.
+	cmp	cx, dx			; CurFreq ò DestFreq?
+	jg	NoPortamento		; Not yet.
+	mov	cx, dx			; If yes, then CurFreq = DestFreq.
+	mov WPtr ds:[bp+DestPeriod], 0	; Clear the destination period.
+
+NoPortamento:
+	mov	ds:[bp+CurPeriod], cx	; Store the period of current note.
+	mov	al, ds:[bp+GlisFunk]	; Fetch the glissando/funk ctrl byte.
+	and	al, 0Fh 		; Extract the low nibble (gliss info).
+	jz	NoGlissando		; Skip glissando if zero.
+
+	mov	ax, ds:[bp+CurPeriod]	; Fetch the period value to search.
+	movzx	bx, ds:[bp+FineTune]	; Fetch the finetune in BX.
+	imul	bx, NoteNum		; Calculate relative offset.
+	add	bx, bx			; Convert it into a word offset.
+	cmp	ModuleType, 0		; Is this an STM?
+	jne	DoGlissando		; Skip the STM-specific code if not.
+	movzx	bx, ds:[bp+InstNum]	; Fetch the instrument number.
+	imul	bx, 120 		; Multiply the BX by 120.
+
+DoGlissando:
+	add	bx, Offset PeriodTable	; Final offset of the period table.
+	mov	cx, NoteNum		; Fetch the number of notes.
+	call	PeriodScan		; Search for the period in AX.
+	mov	cx, [bx]		; Fetch the period of the note to play.
+
+NoGlissando:
+	mov	ax, cx			; Copy the period value to AX.
+	call	PeriodToAcc		; Calculate the new accumulator.
+	mov	[si], eax		; Store the updated accumulator value.
+	ret				; Return to the Main Command Handler.
+
+TonePortamento	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Vibrato 	Proc	Near
+
+	mov	ax, ds:[bp+VibratoInfo] ; Fetch the vibrato info byte in AX.
+	mov	si, ds:[bp+CurAccPtr]	; DS:DI --> Current note's accumulator.
+	mov	di, ds:[bp+VibratoPos]	; Get the Vibrato Table pointer in DI.
+	mov	cx, ax			; Copy the zero-extended byte to CX.
+	shr	cx, 4			; Extract the "speed" component to CL.
+	add	ds:[bp+VibratoPos], cx	; Increment the Vibrato Position.
+	mov	cx, di			; Save the original pointer in CX.
+	and	di, 001Fh		; Extract five lowmost bits (0..31).
+
+	mov	dl, ds:[bp+WaveCtrl]	; Fetch the wave control byte in DL.
+	and	dl, 0Fh 		; Extract the low nibble.
+	jz	VibSine 		; Use sine vibrato if zero.
+	shl	di, 3			; Rotate DI to 8 bits.
+	cmp	dl, 1			; Rampdown?
+	je	VibRampDown		; Jump if yes.
+	mov	ebx, 255		; Unknown commands.
+	jmp	VibSet			; Set the vibrato value.
+
+VibRampDown:
+	mov	bx, di			; Vibrate up by default.
+	test	cx, 20h 		; Which direction to vibrate?
+	jz	VibSet			; Vibrate up if highest bit not set.
+	mov	bx, 255 		; Otherwise vibrate down.
+	sub	bx, di			; Rampdown vibrato down.
+	jmp	VibSet			; Go store the vibrato value.
+
+VibSine:
+	movzx	bx, VibratoTable[di]	; Fetch the period of current position.
+
+VibSet:
+	and	al, 0Fh 		; Extract the "depth" component.
+	imul	bx, ax			; BX = Depth * VibratoValue
+	shr	bx, 7			; BX = Final period value to add/sub.
+	mov	ax, ds:[bp+CurPeriod]	; Fetch the current period value.
+	sub	ax, bx			; AX = New period value.
+	test	cx, 20h 		; Which direction to vibrate?
+	jz	VibratoUp		; Vibrate up if highest bit NOT set.
+	add	ax, bx			; Back to the previous state...
+	add	ax, bx			; ...and vibrato down.
+VibratoUp:
+	call	PeriodToAcc		; Calculate the new accumulator.
+	mov	[si], eax		; Store the updated accumulator.
+	ret				; Return to the Main Command Handler.
+
+Vibrato 	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Tremolo 	Proc	Near
+
+	mov	ax, ds:[bp+TremoloInfo] ; Fetch the tremolo info byte in AX.
+	mov	di, ds:[bp+TremoloPos]	; Get the Vibrato Table pointer in DI.
+	mov	cx, ax			; Copy the zero-extended byte to CX.
+	shr	cx, 4			; Extract the "speed" component to CL.
+	add	ds:[bp+TremoloPos], cx	; Increment the Tremolo Position.
+	mov	cx, di			; Save the original pointer to CX.
+	and	di, 001Fh		; Extract five lowmost bits (0..31).
+
+	mov	dl, ds:[bp+WaveCtrl]	; Fetch the wave control byte in DL.
+	shr	dl, 4			; Extract the hi nibble.
+	or	dl, dl			; Test if the info byte is zero.
+	je	TreSine 		; Use normal sinewave if zero.
+	shl	di, 3			; Rotate DI to 8 bits.
+	cmp	dl, 1			; Rampdown?
+	je	TreRampDown		; Jump if yes.
+	mov	bx, 255 		; Unknown commands.
+	jmp	TreSet			; Set the vibrato value.
+
+TreRampDown:
+	mov	bx, di			; Vibrate up by default.
+	test	cx, 20h 		; Which direction to vibrate?
+	jz	TreSet			; Vibrate up if highest bit not set.
+	mov	bx, 255 		; Otherwise vibrate down.
+	sub	bx, di			; Downward volume vibrato.
+	jmp	TreSet			; Set the vibrato value.
+
+TreSine:
+	movzx	bx, VibratoTable[di]	; Fetch the period of current position.
+
+TreSet:
+	and	al, 0Fh 		; Extract the "depth" component.
+	imul	bx, ax			; BX = Depth * TremoloValue
+	shr	bx, 6			; BX = Final value to add/subs.
+	mov	al, ds:[bp+TrueVol]	; Fetch current volume.
+	sub	al, bl			; AL = new volume.
+	test	cx, 20h 		; Which direction to vibrate?
+	jnz	TremoloTest		; Vibrate down if highest bit set.
+	add	al, bl			; Back to the original value.
+	add	al, bl			; Now AL = the final volume.
+
+TremoloTest:
+	or	al, al			; Test the volume byte.
+	jns	$+4			; AL = 0 if AL < 0
+	xor	al, al			; Zero volume.
+	cmp	al, 64			; AL too big?
+	jb	$+4			; Save new volume if not.
+	mov	al, 64			; Set volume to 64 (max).
+	mov	ds:[bp+TrueVol], al	; Store the new volume.
+	call	MakeCurVol		; Make the volume table address.
+	ret				; Return to the Main Command Handler.
+
+Tremolo 	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Arpeggio	Proc	Near
+
+	cmp	BPtr ds:[bp+CmdInfo], 0 ; Is the infobyte zero?
+	jz	Dummy			; Quit immediately if it is.
+	mov	ax, TickCounter 	; Fetch the current tick counter.
+	mov	dl, 3			; Divide the current tick counter...
+	div	dl			; ...by three.
+	movzx	dx, ds:[bp+CmdInfo]	; Fetch the command info byte.
+	cmp	ah, 1			; Is the remainder 1?
+	je	Arpeg1			; Jump if yes.
+	cmp	ah, 2			; Is the remainder 2?
+	je	Arpeg2			; Jump if yes.
+	mov	ax, ds:[bp+CurPeriod]	; Fetch the original period value.
+	jmp	SetArpPeriod		; Do not change the period this time.
+
+Arpeg1: shr	dl, 4			; Get the high nibble.
+	jmp	SetArpeggio		; Set the new accumulator value.
+Arpeg2: and	dl, 0Fh 		; Get the low nibble.
+
+SetArpeggio:
+	add	dx, dx			; Multiply the DX by 2.
+	mov	ax, ds:[bp+CurPeriod]	; Fetch the original period value.
+	movzx	bx, ds:[bp+FineTune]	; Fetch the finetune in BX.
+	imul	bx, NoteNum		; Calculate relative offset.
+	add	bx, bx			; Convert it into a word offset.
+	cmp	ModuleType, 0		; Is this an STM?
+	jne	SearchPeriod		; Skip the STM-specific code if not.
+	movzx	bx, ds:[bp+InstNum]	; Fetch the instrument number.
+	imul	bx, 120 		; Multiply the BX by 120.
+
+SearchPeriod:
+	add	bx, Offset PeriodTable	; Final offset of the period table.
+	mov	cx, NoteNum		; Fetch the number of notes.
+FindNoteLoop:
+	cmp	ax, [bx]		; Compare the next value.
+	jnb	GotTheNote		; Jump if the right value is found.
+	add	bx, 2			; Increment the index.
+	loop	FindNoteLoop		; Loop until correct note found.
+	ret				; Return if correct note not found.
+GotTheNote:
+	add	bx, dx			; Increment the index.
+	mov	ax, [bx]		; Fetch the new period value.
+
+SetArpPeriod:
+	call	PeriodToAcc		; Calculate the accumulator for it.
+	mov	si, ds:[bp+CurAccPtr]	; DS:SI --> Current note's accumulator.
+	mov	[si], eax		; Save the new accumulator value.
+	ret				; Return to the Main Command Handler.
+
+Arpeggio	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Port_&_Slide	Proc	Near
+
+	call	TonePortamento		; Continue current TonePortamento...
+	call	VolumeSlide		; ...while sliding the volume.
+	ret				; Return to the Main Command Handler.
+
+Port_&_Slide	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Vibrato_&_Slide Proc	Near
+
+	call	Vibrato 		; Continue current Vibrato...
+	call	VolumeSlide		; ...while sliding the volume.
+	ret				; Return to the Main Command Handler.
+
+Vibrato_&_Slide EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+RetrigNote	Proc	Near
+
+	mov	bx, ds:[bp+CmdInfo]	; Fetch the command info byte.
+	and	bx, 0Fh 		; Clear out the high nibble.
+	jz	Dummy			; No retrig if info byte is zero.
+	mov	ax, TickCounter 	; Fetch the current tick counter.
+	div	bl			; AH = TickCounter MOD RetrigCount
+	or	ah, ah			; Test if the remainder is zero.
+	jnz	Dummy			; No restart yet if remainder <> 0.
+	mov	si, ds:[bp+CurSplPtr]	; SI = Ptr to the instrument pointer.
+	mov	[si], ax		; Restart the sample.
+	ret				; Return to the PT-command handler.
+
+RetrigNote	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+NoteCut 	Proc	Near
+
+	mov	ax, ds:[bp+CmdInfo]	; Fetch the command info byte.
+	and	ax, 0Fh 		; Clear out the high nibble.
+	jz	Dummy			; Nothing to do if info byte is zero.
+	cmp	ax, TickCounter 	; Cut sample if info byte = counter.
+	jne	Dummy			; If it's not, don't cut the note.
+	mov	ds:[bp+TrueVol], ah	; Zero the volume byte (AH=0).
+	mov	ds:[bp+Repeat], ah	; Then disable sample looping.
+	mov	si, ds:[bp+CurVolPtr]	; Fetch pointer to the sample volume.
+	lea	ax, VolConv		; Absolute volume table addr. in AX.
+	mov	[si], ax		; Set the current volume to zero.
+	ret				; Return to the PT-command handler.
+
+NoteCut 	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+NoteDelay	Proc	Near
+
+	mov	ax, ds:[bp+CmdInfo]	; Fetch the command info byte.
+	and	ax, 0Fh 		; Clear out the high nibble.
+	cmp	ax, TickCounter 	; If they're equal, start the sample.
+	jne	Dummy			; If they're not, don't play the note.
+	mov	ax, ds:[bp+CurPeriod]	; Fetch the current period value.
+	call	PeriodToAcc		; Calculate the accumulator value.
+	mov	si, ds:[bp+CurAccPtr]	; Fetch pointer to the accumulator.
+	mov	[si], eax		; Self-modify accumulator to the mixer.
+	mov	si, bp			; Copy the infoblock pointer to SI.
+	call	PlayInstrument		; Fetch some instrument information.
+	setc	ds:[bp+Repeat]		; Repeat flag = 1 if looped instrument.
+	mov	ds:[bp+RepeatTo], di	; Set the Loop End offset.
+	mov	ds:[bp+RepeatFrom], cx	; Set the Loop Start offset.
+	mov	si, ds:[bp+CurSplPtr]	; SI = Ptr to the instrument pointer.
+	mov	[si+4], ax		; Store the sample's segment.
+	mov	DPtr [si], 0		; Zero the sample offset.
+	mov	di, ds:[bp+CurLenPtr]	; Fetch pointer to the sample length.
+	mov	[di], bx		; Self-modify the sample's length.
+	rol	ebx, 16 		; Out of registers; have to use EBX.H.
+	mov	ds:[bp+ExtraLen], bx	; Store the length exceeding 64k.
+	ret				; Return to the PT-command handler.
+
+NoteDelay	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ

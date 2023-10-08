@@ -1,0 +1,1633 @@
+.186
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º	     S C R E A M   T R A C K E R   M O D U L E	 P L A Y E R	       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+InitzePlay	Proc			; Input: AX = Output Device:
+					;	  0 = Covox in LPT1
+					;	  1 = Covox in LPT2
+					;	  2 = SoundBlaster
+					;	  3 = Internal Speaker
+					;	 BX = Sample mixing rate
+					; Module must be loaded at segment
+					; "ModuleSeg", offset 0.
+					;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+	pusha				; Save all registers.
+	push	ds			; Save DS.
+	push	es			; Save ES.
+	mov	cx, cs			; Use CX for setting...
+	mov	ds, cx			; ...the Data Segment...
+	mov	es, cx			; ...and the Extra Segment to CS.
+	mov	MixRate, bx		; Store Sample Mixing rate.
+	or	ax, ax			; Covox in LPT1?
+	jz	LPT1			; Jump if yes.
+	dec	ax			; Covox in LPT2?
+	jz	LPT2			; Jump if yes.
+	dec	ax			; SoundBlaster?
+	jz	SBInit			; Jump if yes.
+					; Otherwise speaker.
+Speaker:
+	mov	al, 90h 		; Command byte.
+	out	43h, al 		; Timer command register.
+	in	al, 61h 		; PPI Port B.
+	or	al, 3			; Set two low-most bits.
+	out	61h, al 		; Enable Timer gate & speaker data.
+	mov	IntS, 402Ch		; sub al, 40h
+	mov	ax, 42h 		; Speaker's port address in AX.
+	jmp	short SetPortAddr	; Go self-modify the player.
+
+LPT1:
+	push	es			; Save Extra Segment.
+	mov	ax, 40h 		; AX = Address of BIOS data area.
+	mov	es, ax			; Set ES to point to BIOS data area.
+	mov	ax, es:[8]		; Fetch LPT1's port address.
+	pop	es			; Restore ES.
+	jmp	Short SetPortAddr	; Go self-modify it to the player.
+LPT2:
+	push	es			; Save Extra Segment.
+	mov	ax, 40h 		; AX = Address of BIOS data area.
+	mov	es, ax			; Set ES to point to BIOS data area.
+	mov	ax, es:[10]		; Fetch LPT2's port address.
+	pop	es			; Restore ES.
+
+SetPortAddr:
+	lea	di, Covox2+1		; Clear the SB initialization code.
+	stosw				; Set port address in the player.
+	mov	al, 90h 		; NOP.
+	stosb				; Self-modify the player.
+	mov	cx, 6			; Clear 12 bytes of the player code.
+	mov	ax, 0C08Bh		; MOV AX, AX (=2*NOP, but faster!)
+	rep	stosw			; Self-modify the player.
+	jmp	Short HookInt8		; Go hook the timer interrupt.
+
+SBInit:
+	mov	dx, 226h
+	mov	al, 1
+	out	dx, al
+	jmp	$+2
+	xor	al, al
+	out	dx, al
+	mov	dx, 22Ch
+	in	al, dx
+	rol	al, 1
+	jb	$-3
+	mov	al, 0D1h
+	out	dx, al			; Initialize the Sound Blaster.
+
+HookInt8:
+	push	es			; Save Extra Segment.
+	mov	ax, 3508h		; Use DOS to fetch old int vector.
+	int	21h			; Fetch the old timer int vector.
+	mov	OldInt8Seg, es		; Store its segment.
+	mov	OldInt8Offs, bx 	; And store its offset.
+	pop	es			; Restore ES.
+
+	in	al, 21h 		; Port 21h, 8259-1 int imr
+	or	al, 3			; Disable timer & keyboard ints
+	out	21h, al 		; Port 21h, 8259-1 int commands
+	lea	dx, LogicPart		; Hook timer interrupt
+	mov	ax, 2508h		; Use DOS to hook the interrupt.
+	int	21h			; Set timer intrpt vector to DS:DX
+
+	mov	bx, MixRate		; Fetch the mixing rate in hertz.
+	lea	si, NoteHertz		; Point SI to note hertz table.
+	lea	di, NoteFreqs		; Set the destination index.
+	xor	dx, dx			; Clear the DX.
+	mov	cx, 60			; 60 notes to handle.
+Calc:
+	lodsw				; Fetch the next hertz amount.
+	call	Divide
+	add	di, 4			; Set the DI to point next table entry.
+	loop	Calc			; Establish the note counter table.
+	lea	si, NoteFreqs		; Set the SI...
+	mov	di, si			; ...and DI to point it.
+	mov	cx, 60			; Set the count.
+Calc2:
+	inc	si
+	inc	si
+	inc	di
+	inc	di			; Increment the SI & DI.
+	lodsw				; Fetch the next decimal part.
+	xor	dx, dx
+	mov	bx, 66
+	mul	bx			; Multiply it by 66.
+	stosw				; And store the result.
+	loop	Calc2			; Loop to handle the whole table.
+	mov	ax, MixRate		; Fetch the timer frequency.
+	xor	dx, dx
+	mov	bx, 10
+	mul	bx			; Multiply it by ten.
+	mov	bx, 182 		; Set up a division of TimerFreq / 18.2
+	lea	di, TimerCount		; Set the DI.
+	call	Divide			; Perform the division.
+	cmp	TimerCount+2, 500
+	jb	NoRound
+	inc	TimerCount
+NoRound:
+	mov	ax, TimerCount
+	mov	TimerOrg, ax		; Store the timer counter.
+	mov	dx, 12h
+	mov	ax, 3040h		; Set up the dividend.
+	mov	bx, MixRate		; Set up the divisor.
+	lea	di, TimerCn		; Set the DI.
+	call	Divide			; Do the division.
+	cmp	TimerCn+2, 500
+	jb	NoRnd
+	inc	TimerCn
+NoRnd:
+	mov	ax, TimerCn
+	mov	TimerCnt, al
+
+CalcTempo:
+	mov	ax, ModuleSeg
+	mov	es, ax
+	mov	bx, 32			; Point the module in memory.
+	mov	al, es:[bx]		; Fetch the Global tempo byte.
+	xor	ah, ah
+	mov	TempoNumber, ax 	; Store it.
+	mov	bx, ax
+	shr	bx, 4			; Disregard the zero 6(0)h.
+	mov	ax, 750
+	xor	dx, dx
+	lea	di, Result		; Set a temporary variable for results.
+	call	Divide			; 750 / Speed.
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 60
+	call	Divide			; Previous result / 60.
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	add	ax, Result+2
+	adc	dx, 0
+	mov	bx, 4
+	mul	bx
+	mov	bx, 1000
+	call	Divide
+	mov	ax, MixRate
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	push	ax
+	push	dx
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	add	ax, Result+2
+	adc	dx, 0
+	mov	bx, ax
+	pop	dx
+	pop	ax
+	call	Divide
+	cmp	Result+2, 500
+	jb	Nor
+	inc	Result
+Nor:
+	mov	ax, Result
+	mov	Tempo, ax
+	mov	TempoCount+1, ax
+
+	mov	bx, 34
+	mov	al, es:[bx]		; Fetch the global volume.
+	mov	Volume1+1, al
+	mov	Volume2+1, al
+	mov	Volume3+1, al
+	mov	Volume4+1, al
+	xor	ax, ax
+	mov	LengthOfSpl1+2, ax
+	mov	LengthOfSpl2+2, ax
+	mov	LengthOfSpl3+2, ax
+	mov	LengthOfSpl4+2, ax
+	mov	StartLoop1+1, ax
+	mov	StartLoop2+1, ax
+	mov	StartLoop3+1, ax
+	mov	StartLoop4+1, ax
+	mov	IntPart1+2, ax
+	mov	IntPart2+2, ax
+	mov	IntPart3+2, ax
+	mov	IntPart4+2, ax
+	mov	DecPart1+1, ax
+	mov	DecPart2+1, ax
+	mov	DecPart3+1, ax
+	mov	DecPart4+1, ax		; Zero out certain self-modified parts.
+
+	mov	al, 34h 		; Channel 0, mode 2, binary
+	out	43h, al 		; Port 43h, 8253 write timer mode
+	mov	al, TimerCnt		; Get lsb.
+	out	40h, al 		; Output lsb to timer 0 clock
+	xor	al, al			; Msb = 0.
+	out	40h, al 		; Port 40h, 8253 timer 0 clock
+
+	in	al, 21h
+	and	al, 0FCh		; Enable timer & keyboard interrupts.
+	out	21h, al
+	pop	es
+	pop	ds
+	popa				; Restore all registers.
+	ret				; Return.
+
+InitzePlay	EndP
+;ÉÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍ»
+;º This subroutine divides two integers giving a real result.		       º
+;º INPUT: DX:AX = Dividend, BX = Divisor.				       º
+;º OUTPUT: Is piped to [di], [di+2] ie. the result is a doubleword.(3 Decimals)º
+;ÈÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍ¼
+Divide	Proc	Near
+
+	Assume	DS:Cseg
+	push	ax
+	push	bx
+	push	cx
+	push	dx
+	div	bx			; Divide to obtain the integer part.
+	mov	cx, bx			; Save the divisor.
+	mov	[di], ax		; Store the integer part.
+	mov	ax, dx
+	xor	dx, dx
+	mov	bx, 10
+	mul	bx			; Multiply the remainder by ten.
+	mov	bx, cx			; Restore the original divisor.
+	div	bx			; Divide to get the decimal part.
+	mov	bp, dx			; Save the remainder.
+	xor	dx, dx			; Clear the DX.
+	mov	bx, 100
+	mul	bx			; Multiply it by 100.
+	mov	[di+2], ax		; Store it.
+	mov	ax, bp
+	xor	dx, dx
+	mov	bx, 10
+	mul	bx			; Multiply the remainder by ten.
+	mov	bx, cx			; Restore the original divisor.
+	div	bx			; Divide to get the next decimal.
+	mov	bp, dx			; Save the remainder.
+	xor	dx, dx			; Clear the DX.
+	mov	bx, 10
+	mul	bx			; Multiply it by ten.
+	add	[di+2], ax		; Store the result.
+	mov	ax, bp
+	xor	dx, dx
+	mov	bx, 10
+	mul	bx			; Multiply the remainder by ten.
+	mov	bx, cx			; Restore the original divisor.
+	div	bx			; Divide to get the last decimal.
+	add	[di+2], ax		; Store the last decimal.
+	pop	dx
+	pop	cx
+	pop	bx
+	pop	ax			; Restore registers.
+	ret				; Return.
+
+	Align 2
+
+Divide		Endp
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+EndPlay 	Proc
+
+	push	ax
+	push	dx
+	push	ds			; Save the registers used.
+	mov	ax, cs
+	mov	ds, ax			; Set DS to point to CS.
+
+	in	al, 21h
+	or	al, 1
+	out	21h, al 		; Disable timer and keyboard interrupts.
+
+	in	al, 61h
+	and	al, 0FCh		; Disable timer gate & speaker data.
+	out	61h, al
+
+	mov	ax, 533h
+	out	42h, al
+	mov	al, ah
+	out	42h, al
+
+	mov	al, 34h
+	out	43h, al
+	xor	al, al
+	out	40h, al
+	out	40h, al 		; Set timer channel 0 back to normal.
+
+	lds	dx, OldInt8
+	mov	ax, 2508h
+	int	21h
+	in	al, 21h
+	and	al, 0FCh
+	out	21h, al 		; Enable external interrupts.
+	pop	ds
+	pop	dx
+	pop	ax
+	ret				; Return.
+
+	Align	2
+
+EndPlay 	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+OldInt8 	Label	Dword
+OldInt8offs	DW	0
+OldInt8seg	DW	0
+
+	Align	2
+
+MixRate 	DW	0		; Sample mixing frequency in Hertz.
+TimerCn 	DW	70,0		; A counter for the timer int hooker.
+TimerCount	DW	947,0		; Count when to execute BIOS timer.
+TimerOrg	DW	947		; A save for the previous counter.
+Result		DW	0,0
+TimerCnt	DB	0
+
+	Align	2
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;	   The main algotrithm for playing the four channeled music.
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Wrap1:
+Looped1 	Label	Byte
+	Jmp	Short	NotLooped1
+StartLoop1	Label	Word
+	mov	bx, 1111h
+	Jmp	Short	NoWrap1
+NotLooped1:
+	Jmp	Short	ChannelOneOff
+
+Wrap2:
+Looped2 	Label	Byte
+	Jmp	Short	NotLooped2
+StartLoop2	Label	Word
+	mov	bx, 1111h
+	Jmp	Short	NoWrap2
+NotLooped2:
+	Jmp	Short	ChannelTwoOff
+
+Player		Proc	Near
+
+	push	ax
+	push	bx
+	push	cx
+	push	dx
+	push	ds
+	push	es
+
+Covox2	Label	Byte
+	mov	dx, 022Ch
+	in	al, dx
+	rol	al, 1
+	jb	$-3
+	mov	al, 10h
+	out	dx, al
+	in	al, dx
+	rol	al, 1
+	jb	$-3
+
+	mov	ax, cs
+	mov	ds, ax
+	xor	cx, cx
+SampleSeg1	Label	Word
+	mov	ax, 1111h
+	mov	es, ax
+SampleOffs1	Label	Word
+	mov	bx, 1111h
+LengthOfSpl1	Label	Word
+	cmp	bx, 1111h
+	jae	Wrap1
+NoWrap1:
+DecPart1	Label	Word
+	mov	ax, 1111h
+Decimal1	Label	Word
+	add	ax, 0
+IntPart1	Label	Word
+	adc	bx, 1111h
+	mov	Decimal1+1, ax
+	mov	SampleOffs1+1, bx
+	mov	bl, es:[bx]
+Volume1 	Label	Byte
+	mov	bh, 0
+	mov	cl, Volumes[bx]
+ChannelOneOff:
+
+SampleSeg2	Label	Word
+	mov	ax, 1111h
+	mov	es, ax
+SampleOffs2	Label	Word
+	mov	bx, 1111h
+LengthOfSpl2	Label	Word
+	cmp	bx, 1111h
+	jae	Wrap2
+NoWrap2:
+DecPart2	Label	Word
+	mov	ax, 1111h
+Decimal2	Label	Word
+	add	ax, 0
+IntPart2	Label	Word
+	adc	bx, 1111h
+	mov	Decimal2+1, ax
+	mov	SampleOffs2+1, bx
+	mov	bl, es:[bx]
+Volume2 	Label	Byte
+	mov	bh, 0
+	add	cl, Volumes[bx]
+ChannelTwoOff:
+
+SampleSeg3	Label	Word
+	mov	ax, 1111h
+	mov	es, ax
+SampleOffs3	Label	Word
+	mov	bx, 1111h
+LengthOfSpl3	Label	Word
+	cmp	bx, 1111h
+	jae	Wrap3
+NoWrap3:
+DecPart3	Label	Word
+	mov	ax, 1111h
+Decimal3	Label	Word
+	add	ax, 0
+IntPart3	Label	Word
+	adc	bx, 1111h
+	mov	Decimal3+1, ax
+	mov	SampleOffs3+1, bx
+	mov	bl, es:[bx]
+Volume3 	Label	Byte
+	mov	bh, 0
+	add	cl, Volumes[bx]
+ChannelThreeOff:
+
+SampleSeg4	Label	Word
+	mov	ax, 1111h
+	mov	es, ax
+SampleOffs4	Label	Word
+	mov	bx, 1111h
+LengthOfSpl4	Label	Word
+	cmp	bx, 1111h
+	jae	Wrap4
+NoWrap4:
+DecPart4	Label	Word
+	mov	ax, 1111h
+Decimal4	Label	Word
+	add	ax, 0
+IntPart4	Label	Word
+	adc	bx, 1111h
+	mov	Decimal4+1, ax
+	mov	SampleOffs4+1, bx
+	mov	bl, es:[bx]
+Volume4 	Label	Byte
+	mov	bh, 0
+	add	cl, Volumes[bx]
+ChannelFourOff:
+
+	mov	al, cl
+	add	al, 80h
+IntS	Label	Word
+	mov	ax, ax
+	out	dx, al
+	dec	TimerCount
+	jz	OrgTimer
+	dec	Tempo
+	jz	Logic
+	dec	CommandCounter
+	jz	ParseCommands
+	mov	al, 20h
+	out	20h, al
+	pop	es
+	pop	ds
+	pop	dx
+	pop	cx
+	pop	bx
+	pop	ax
+	iret
+Wrap3:
+Looped3 	Label	Byte
+	Jmp	Short	NotLooped3
+StartLoop3	Label	Word
+	mov	bx, 1111h
+	Jmp	Short	NoWrap3
+NotLooped3:
+	Jmp	Short	ChannelThreeOff
+Wrap4:
+Looped4 	Label	Byte
+	Jmp	Short	NotLooped4
+StartLoop4	Label	Word
+	mov	bx, 1111h
+	Jmp	Short	NoWrap4
+NotLooped4:
+	mov	Byte Ptr Channel4Off, 1
+	Jmp	Short	ChannelFourOff
+
+OrgTimer:
+	mov	ax, TimerOrg
+	mov	TimerCount,ax
+	pushf
+	Call	CS:Dword Ptr OldInt8
+	dec	Tempo
+	jz	Logic
+	dec	CommandCounter
+	jz	ParseCommands
+	mov	al, 20h
+	out	20h, al
+	pop	es
+	pop	ds
+	pop	dx
+	pop	cx
+	pop	bx
+	pop	ax
+	iret
+
+Logic:
+	cli
+	xor	ax, ax
+	mov	es, ax
+	mov	bx, 32
+	mov	es:[bx], Offset LogicPart
+	mov	es:[bx+2], cs
+	sti
+	mov	al, 20h
+	out	20h, al
+	pop	es
+	pop	ds
+	pop	dx
+	pop	cx
+	pop	bx
+	pop	ax
+	iret
+
+ParseCommands:
+	mov	ax, CommandOrg
+	mov	CommandCounter, ax
+
+Command1	Label	Byte
+	mov	bl, 0
+	xor	bh, bh
+	shl	bx, 1
+	Jmp	CmdAddrs1[bx]
+Return1:
+Command2	Label	Byte
+	mov	bl, 0
+	xor	bh, bh
+	shl	bx, 1
+	Jmp	CmdAddrs2[bx]
+Return2:
+Command3	Label	Byte
+	mov	bl, 0
+	xor	bh, bh
+	shl	bx, 1
+	Jmp	CmdAddrs3[bx]
+Return3:
+Command4	Label	Byte
+	mov	bl, 0
+	xor	bh, bh
+	shl	bx, 1
+	Jmp	CmdAddrs4[bx]
+Return4:
+	mov	al, 20h
+	out	20h, al
+	pop	es
+	pop	ds
+	pop	dx
+	pop	cx
+	pop	bx
+	pop	ax
+	iret
+
+A1	Label	Word
+
+	mov	al, Info1
+	xor	ah, ah
+	mov	TempoNumber, ax
+	mov	bx, ax
+	shr	bx, 4			; Disregard the zero 6(0)h.
+	mov	ax, 750
+	xor	dx, dx
+	lea	di, Result		; Set a temporary variable for results.
+	Call	Divide			; 750 / Speed.
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 60
+	Call	Divide			; Previous result / 60.
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	add	ax, Result+2
+	adc	dx, 0
+	mov	bx, 4
+	mul	bx
+	mov	bx, 1000
+	Call	Divide
+	mov	ax, MixRate
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	push	ax
+	push	dx
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	add	ax, Result+2
+	adc	dx, 0
+	mov	bx, ax
+	pop	dx
+	pop	ax
+	Call	Divide
+	cmp	Result+2, 500
+	jb	Nor1
+	inc	Result
+Nor1:
+	mov	ax, Result
+	mov	Tempo, ax
+	mov	TempoCount+1, ax
+	ret
+
+B1	Label	Word
+
+	mov	ax, ModuleSeg
+	mov	es, ax
+	mov	al, Info1
+	xor	ah, ah
+	add	ax, 410h
+	mov	bx, ax
+	mov	al, es:[bx]
+	inc	bx
+	cmp	al, 99
+	jb	NotLoopYet1
+	mov	bx, 410h
+	mov	al, es:[bx]
+	inc	bx
+NotLoopYet1:
+	mov	MusicWrapped, 1
+	mov	CurrentOrder, bx
+	ret
+
+C1	Label	Word
+
+	mov	RowCounter, 1		; Fetch order on next pass.
+	ret
+
+D1	Label	Word
+
+	mov	al, Info1
+	xor	ah, ah
+	mov	bl, Volume1+1
+	cmp	al, 0fh
+	ja	SlideUp1
+	sub	bl, al
+	cmp	bl, 64
+	jbe	NoOvrf11
+	mov	bl, 0
+NoOvrf11:
+	mov	Volume1+1, bl
+	mov	VolumeLevels, bl
+	jmp	Return1
+SlideUp1:
+	shr	al, 4
+	xor	bh, bh
+	add	bl, al
+	cmp	bl, 64
+	jbe	NoOvrf12
+	mov	bl, 64
+NoOvrf12:
+	mov	Volume1+1, bl
+	mov	VolumeLevels, bl
+	Jmp	Return1
+
+E1	Label	Word
+
+	mov	al, Info1
+	xor	ah, ah
+	cwd
+	mov	bx, 396
+	mul	bx
+	mov	bx, 5
+	div	bx
+	sub	DecPart1+1, ax
+	sbb	IntPart1+2, 0
+	Jmp	Return1
+
+F1	Label	Word
+
+	mov	al, Info1
+	xor	ah, ah
+	cwd
+	mov	bx, 396
+	mul	bx
+	mov	bx, 5
+	div	bx
+	add	DecPart1+1, ax
+	adc	IntPart1+2, 0
+	Jmp	Return1
+
+A2	Label	Word
+
+	mov	al, Info2
+	xor	ah, ah
+	mov	TempoNumber, ax
+	mov	bx, ax
+	shr	bx, 4			; Disregard the zero 6(0)h.
+	mov	ax, 750
+	xor	dx, dx
+	lea	di, Result		; Set a temporary variable for results.
+	Call	Divide			; 750 / Speed.
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 60
+	Call	Divide			; Previous result / 60.
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	add	ax, Result+2
+	adc	dx, 0
+	mov	bx, 4
+	mul	bx
+	mov	bx, 1000
+	Call	Divide
+	mov	ax, MixRate
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	push	ax
+	push	dx
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	add	ax, Result+2
+	adc	dx, 0
+	mov	bx, ax
+	pop	dx
+	pop	ax
+	Call	Divide
+	cmp	Result+2, 500
+	jb	Nor2
+	inc	Result
+Nor2:
+	mov	ax, Result
+	mov	Tempo, ax
+	mov	TempoCount+1, ax
+	ret
+
+B2	Label	Word
+
+	mov	ax, ModuleSeg
+	mov	es, ax
+	mov	al, Info2
+	xor	ah, ah
+	add	ax, 410h
+	mov	bx, ax
+	mov	al, es:[bx]
+	inc	bx
+	cmp	al, 99
+	jb	NotLoopYet2
+	mov	bx, 410h
+	mov	al, es:[bx]
+	inc	bx
+NotLoopYet2:
+	mov	MusicWrapped, 1
+	mov	CurrentOrder, bx
+	ret
+
+D2	Label	Word
+
+	mov	al, Info2
+	xor	ah, ah
+	mov	bl, Volume2+1
+	cmp	al, 0Fh
+	ja	Slideup2
+	sub	bl, al
+	cmp	bl, 64
+	jbe	NoOvrf21
+	mov	bl, 0
+NoOvrf21:
+	mov	Volume2+1, bl
+	mov	VolumeLevels+1, bl
+	Jmp	Return2
+SlideUp2:
+	shr	al, 4
+	xor	bh, bh
+	add	bl, al
+	cmp	bl, 64
+	jbe	NoOvrf22
+	mov	bl, 64
+NoOvrf22:
+	mov	Volume2+1, bl
+	mov	VolumeLevels+1, bl
+	Jmp	Return2
+
+E2	Label	Word
+
+	mov	al, Info2
+	xor	ah, ah
+	cwd
+	mov	bx, 396
+	mul	bx
+	mov	bx, 5
+	div	bx
+	sub	DecPart2+1, ax
+	sbb	IntPart2+2, 0
+	Jmp	Return2
+
+F2	Label	Word
+
+	mov	al, Info2
+	xor	ah, ah
+	cwd
+	mov	bx, 396
+	mul	bx
+	mov	bx, 5
+	div	bx
+	add	DecPart2+1, ax
+	adc	IntPart2+2, 0
+	Jmp	Return2
+
+A3	Label	Word
+
+	mov	al, Info3
+	xor	ah, ah
+	mov	TempoNumber, ax
+	mov	bx, ax
+	shr	bx, 4			; Disregard the zero 6(0)h.
+	mov	ax, 750
+	xor	dx, dx
+	lea	di, Result		; Set a temporary variable for results.
+	Call	Divide			; 750 / Speed.
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 60
+	Call	Divide			; Previous result / 60.
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	add	ax, Result+2
+	adc	dx, 0
+	mov	bx, 4
+	mul	bx
+	mov	bx, 1000
+	Call	Divide
+	mov	ax, MixRate
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	push	ax
+	push	dx
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	add	ax, Result+2
+	adc	dx, 0
+	mov	bx, ax
+	pop	dx
+	pop	ax
+	Call	Divide
+	cmp	Result+2, 500
+	jb	Nor3
+	inc	Result
+Nor3:
+	mov	ax, Result
+	mov	Tempo, ax
+	mov	TempoCount+1, ax
+	ret
+
+B3	Label	Word
+
+	mov	ax, ModuleSeg
+	mov	es, ax
+	mov	al, Info3
+	xor	ah, ah
+	add	ax, 410h
+	mov	bx, ax
+	mov	al, es:[bx]
+	inc	bx
+	cmp	al, 99
+	jb	NotLoopYet3
+	mov	bx, 410h
+	mov	al, es:[bx]
+	inc	bx
+NotLoopYet3:
+	mov	MusicWrapped, 1
+	mov	CurrentOrder, bx
+	ret
+
+D3	Label	Word
+
+	mov	al, info3
+	xor	ah, ah
+	mov	bl, volume3+1
+	cmp	al, 0Fh
+	ja	Slideup3
+	sub	bl, al
+	cmp	bl, 64
+	jbe	noovrf31
+	mov	bl, 0
+noovrf31:
+	mov	volume3+1, bl
+	mov	VolumeLevels+2, bl
+	jmp	return3
+slideup3:
+	shr	al, 4
+	xor	bh, bh
+	add	bl, al
+	cmp	bl, 64
+	jbe	noovrf32
+	mov	bl, 64
+noovrf32:
+	mov	volume3+1, bl
+	mov	VolumeLevels+2, bl
+	jmp	return3
+
+E3	Label	Word
+
+	mov	al, Info3
+	xor	ah, ah
+	cwd
+	mov	bx, 396
+	mul	bx
+	mov	bx, 5
+	div	bx
+	sub	DecPart3+1, ax
+	sbb	IntPart3+2, 0
+	Jmp	Return3
+
+F3	Label	Word
+
+	mov	al, Info3
+	xor	ah, ah
+	cwd
+	mov	bx, 396
+	mul	bx
+	mov	bx, 5
+	div	bx
+	add	DecPart3+1, ax
+	adc	IntPart3+2, 0
+	Jmp	Return3
+
+A4	Label	Word
+
+	mov	al, Info4
+	xor	ah, ah
+	mov	TempoNumber, ax
+	mov	bx, ax
+	shr	bx, 4			; Disregard the zero 6(0)h.
+	mov	ax, 750
+	xor	dx, dx
+	lea	di, Result		; Set a temporary variable for results.
+	Call	Divide			; 750 / Speed.
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 60
+	Call	Divide			; Previous result / 60.
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	add	ax, Result+2
+	adc	dx, 0
+	mov	bx, 4
+	mul	bx
+	mov	bx, 1000
+	Call	Divide
+	mov	ax, MixRate
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	push	ax
+	push	dx
+	mov	ax, Result
+	xor	dx, dx
+	mov	bx, 1000
+	mul	bx
+	add	ax, Result+2
+	adc	dx, 0
+	mov	bx, ax
+	pop	dx
+	pop	ax
+	Call	Divide
+	cmp	Result+2, 500
+	jb	Nor4
+	inc	Result
+Nor4:
+	mov	ax, Result
+	mov	Tempo, ax
+	mov	TempoCount+1, ax
+	ret
+
+B4	Label	Word
+
+	mov	ax, ModuleSeg
+	mov	es, ax
+	mov	al, Info4
+	xor	ah, ah
+	add	ax, 410h
+	mov	bx, ax
+	mov	al, es:[bx]
+	inc	bx
+	cmp	al, 99
+	jb	NotLoopYet4
+	mov	bx, 410h
+	mov	al, es:[bx]
+	inc	bx
+NotLoopYet4:
+	mov	MusicWrapped, 1
+	mov	CurrentOrder, bx
+	ret
+
+D4	Label	Word
+
+	mov	al, info4
+	xor	ah, ah
+	mov	bl, volume4+1
+	cmp	al, 0Fh
+	ja	Slideup4
+	sub	bl, al
+	cmp	bl, 64
+	jbe	noovrf41
+	mov	bl, 0
+NoOvrf41:
+	mov	Volume4+1, bl
+	mov	VolumeLevels+3, bl
+	Jmp	Return4
+SlideUp4:
+	shr	al, 4
+	xor	bh, bh
+	add	bl, al
+	cmp	bl, 64
+	jbe	NoOvrf42
+	mov	bl, 64
+noovrf42:
+	mov	Volume4+1, bl
+	mov	VolumeLevels+3, bl
+	Jmp	Return4
+
+E4	Label	Word
+
+	mov	al, Info4
+	xor	ah, ah
+	cwd
+	mov	bx, 396
+	mul	bx
+	mov	bx, 5
+	div	bx
+	sub	DecPart4+1, ax
+	sbb	IntPart4+2, 0
+	Jmp	Return4
+
+F4	Label	Word
+
+	mov	al, Info4
+	xor	ah, ah
+	cwd
+	mov	bx, 396
+	mul	bx
+	mov	bx, 5
+	div	bx
+	add	DecPart4+1, ax
+	adc	IntPart4+2, 0
+	Jmp	Return4
+
+	Align 2
+
+Player	      EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+; Algorithm for fetching the note & instrument from the module file in memory.
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+LogicPart	Proc	Far
+
+	pusha
+	push	ds
+	push	es
+	mov	ax, cs
+	mov	ds, ax
+TempoCount	Label	Word
+	mov	ax, 1111h
+	mov	Tempo, ax
+	dec	RowCounter
+	jnz	Short NoOrderFetch
+	call	OrderFetch
+NoOrderFetch:
+	mov	es, CurrentRowSeg
+	xor	bx, bx			; ES:BX --> Current row in song.
+
+;******************************* Channel One ***********************************
+
+	call	FetchInstrument 	; Fetch instrument & info.
+	js	NoInstrument1		; Jump if no instrument found.
+	mov	Looped1+1, 0		; Clear a self-modify jump.
+	jnc	LoopedInstr1		; Jump if looped instrument
+	mov	Looped1+1, NotLooped1-(Looped1+2) ; Self-modify a jump.
+LoopedInstr1:
+	mov	SampleSeg1+1, ax	; Self-modify seg. addr. to the player.
+	mov	LengthOfSpl1+2, bx	; Self-modify instr. length.
+	mov	StartLoop1+1, cx	; Self-modify Loop Start to the player.
+	mov	SampleOffs1+1, cx	; Self-modify starting offset.
+	mov	Volume1+1, dl		; Self-modify Instr. Volume.
+	mov	VolumeLevels, dl
+	mov	es, CurrentRowSeg	; Restore original ES.
+	xor	bx, bx			; Clear BX.
+NoInstrument1:
+	call	FetchNoteFreq		; Fetch channel 1 note frequency.
+	jc	NoNote1 		; Jump if no note found.
+	mov	SampleOffs1+1, 0	; Zero the sample pointer.
+	mov	IntPart1+2, ax		; Self-modify Integer Part.
+	mov	DecPart1+1, dx		; Self-modify Decimal Part.
+NoNote1:
+	call	FetchVolume		; Fetch possible volume info.
+	ja	NoVolume1		; Jump if no volume.
+	mov	Volume1+1, al		; Self-modify volume to the player.
+	mov	VolumeLevels, al
+NoVolume1:
+	call	FetchCommand		; Fetch possible command bytes.
+	mov	Command1+1, al		; Self-modify the Command.
+	mov	Info1, ah		; Store the Command Info.
+	add	bx, 4			; Point to start of second channel.
+
+;***************************** Channel Two ***********************************
+
+	call	FetchInstrument 	; Fetch instrument & info.
+	js	NoInstrument2		; Jump if no instrument found.
+	mov	Looped2+1, 0		; Clear a self-modify jump.
+	jnc	LoopedInstr2		; Jump if looped instrument
+	mov	Looped2+1, NotLooped2-(Looped2+2) ; Self-modify a jump.
+LoopedInstr2:
+	mov	SampleSeg2+1, ax
+	mov	LengthOfSpl2+2, bx
+	mov	StartLoop2+1, cx
+	mov	SampleOffs2+1, cx
+	mov	Volume2+1, dl
+	mov	VolumeLevels+1, dl
+	mov	es, CurrentRowSeg	; Restore original ES.
+	mov	bx, 4			; Restore original BX.
+NoInstrument2:
+	call	FetchNoteFreq
+	jc	NoNote2
+	mov	SampleOffs2+1, 0
+	mov	IntPart2+2, ax
+	mov	DecPart2+1, dx
+NoNote2:
+	call	FetchVolume
+	ja	NoVolume2
+	mov	Volume2+1, al
+	mov	VolumeLevels+1, al
+NoVolume2:
+	call	FetchCommand
+	mov	Command2+1, al
+	mov	Info2, ah
+	add	bx, 4
+
+;***************************** Channel Three ***********************************
+
+	call	FetchInstrument 	; Fetch instrument & info.
+	js	NoInstrument3		; Jump if no instrument found.
+	mov	Looped3+1, 0		; Clear a self-modify jump.
+	jnc	LoopedInstr3		; Jump if looped instrument
+	mov	Looped3+1, NotLooped3-(Looped3+2) ; Self-modify a jump.
+LoopedInstr3:
+	mov	SampleSeg3+1, ax
+	mov	LengthOfSpl3+2, bx
+	mov	StartLoop3+1, cx
+	mov	SampleOffs3+1, cx
+	mov	Volume3+1, dl
+	mov	VolumeLevels+2, dl
+	mov	es, CurrentRowSeg	; Restore original ES.
+	mov	bx, 8			; Restore original BX.
+NoInstrument3:
+	call	FetchNoteFreq
+	jc	NoNote3
+	mov	SampleOffs3+1, 0
+	mov	IntPart3+2, ax
+	mov	DecPart3+1, dx
+NoNote3:
+	call	FetchVolume
+	ja	NoVolume3
+	mov	Volume3+1, al
+	mov	VolumeLevels+2, al
+NoVolume3:
+	call	FetchCommand
+	mov	Command3+1, al
+	mov	Info3, ah
+	add	bx, 4
+
+;****************************** Channel Four ***********************************
+
+	call	FetchInstrument 	; Fetch instrument & info.
+	js	NoInstrument4		; Jump if no instrument found.
+	mov	Looped4+1, 0		; Clear a self-modify jump.
+	jnc	LoopedInstr4		; Jump if looped instrument
+	mov	Looped4+1, NotLooped4-(Looped4+2) ; Self-modify a jump.
+LoopedInstr4:
+	mov	SampleSeg4+1, ax
+	mov	LengthOfSpl4+2, bx
+	mov	StartLoop4+1, cx
+	mov	SampleOffs4+1, cx
+	mov	Volume4+1, dl
+	mov	VolumeLevels+3, dl
+	mov	es, CurrentRowSeg	; Restore original ES.
+	mov	bx, 12			; Restore original BX.
+NoInstrument4:
+	call	FetchNoteFreq
+	jc	NoNote4
+	mov	IntPart4+2, ax
+	mov	DecPart4+1, dx
+	xor	ax, ax
+	mov	SampleOffs4+1, ax
+	mov	Channel4Off, al
+NoNote4:
+	call	FetchVolume
+	ja	NoVolume4
+	mov	Volume4+1, al
+	mov	VolumeLevels+3, al
+NoVolume4:
+	call	FetchCommand
+	mov	Command4+1, al
+	mov	Info4, ah
+
+;*************************** Command Handling **********************************
+
+HandleCommands:
+	inc	CurrentRowSeg		; Next row.
+	xor	dx, dx
+	mov	bx, TempoNumber
+	shr	bx, 4
+	dec	bx
+	mov	ax, Tempo
+	div	bx
+	mov	CommandCounter, 1
+	mov	CommandOrg, ax
+
+	mov	bl, Command1+1
+	xor	bh, bh
+	shl	bx, 1
+	call	FirstAddrs1[bx]
+	mov	bl, Command2+1
+	xor	bh, bh
+	shl	bx, 1
+	call	FirstAddrs2[bx]
+	mov	bl, Command3+1
+	xor	bh, bh
+	shl	bx, 1
+	call	FirstAddrs3[bx]
+	mov	bl, Command4+1
+	xor	bh, bh
+	shl	bx, 1
+	call	FirstAddrs4[bx]
+
+	cli
+	xor	ax, ax
+	mov	es, ax
+	mov	bx, 32
+	mov	es:[bx], Offset Player
+	mov	es:[bx+2], cs
+	sti
+	mov	al, 20h
+	out	20h, al
+	pop	es
+	pop	ds
+	popa
+	iret
+
+LogicPart	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FetchInstrument Proc	Near		; Returns: AX = Instr. Seg. Address
+					;	   BX = Instrument Length
+					;	   CX = Loop Start Offset
+					;	   DL = Instrument Volume
+					;	   CF set if NOT looped instr.
+					;	   SF set if no instr. found
+	xor	ax, ax
+	mov	al, es:[bx+1]
+	shr	al, 1
+	shr	al, 1
+	shr	al, 1
+	dec	ax
+	jns	$+4
+	clc
+	ret
+	mov	si, ax			; Instrument number in SI.
+	mov	ax, ModuleSeg		; Module's Segment Address --> AX
+	mov	es, ax			; ES = Module segment.
+	shl	si, 5			; Multiply by 32.
+	add	si, 62			; Now DS:SI --> Instrument info.
+	add	ax, es:[si]		; Fetch segment address of instrument.
+	mov	bx, es:[si+2]		; Fetch length of the instrument.
+	mov	cx, es:[si+4]		; Fetch "Loop Start"
+	mov	dx, es:[si+6]		; Fetch "Loop End"
+	stc				; Default = Instrument not looped.
+	inc	dx
+	je	NoInstrLoop		; Jump if Loop End = 0FFFFh
+	dec	dx
+	je	NoInstrLoop		; Jump if Loop End = 0
+	mov	bx, dx			; Otherwise store it as the length.
+	clc				; Clear Carry; instrument is looped.
+NoInstrLoop:
+	mov	dl, es:[si+8]		; Fetch instrument volume.
+	ret
+
+FetchInstrument Endp
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FetchNoteFreq	Proc	Near		; Returns: AX = Integer Part
+					;	   DX = Decimal Part
+					;	   CF set if no note
+	xor	cx, cx
+	mov	cl, es:[bx]		; Fetch note.
+	cmp	cl, 0FFh
+	jne	IsNote			; Jump if CL does contain a note.
+	stc				; Set carry to indicate the result.
+	ret				; Return if no note found.
+IsNote:
+	mov	al, cl			; Copy the Note byte to AL.
+	and	cl, 0Fh 		; Extract four lowmost bits of the CL.
+	shl	cl, 1
+	shl	cl, 1
+	shr	al, 4			; Extract four upmost bits of the AL.
+	mov	ah, 48
+	mul	ah			; AX = AH * AL
+	add	ax, cx
+	mov	si, ax
+	mov	ax, NoteFreqs[si]	; Fetch frequency of the note.
+	mov	dx, NoteFreqs[si+2]	; Fetch decimal part of the freq.
+	clc				; Clear carry.
+	ret
+
+FetchNoteFreq	Endp
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FetchVolume	Proc	Near		; Returns: AL = Volume
+					;	   CF & ZF = 0 if no volume.
+
+	mov	al, es:[bx+1]		; Fetch first part of the volume info.
+	and	al, 7			; Extract three lowmost bits.
+	mov	cl, es:[bx+2]		; Fetch second part of the volume info.
+	shr	cl, 1			; Extract 7 upmost bits.
+	add	al, cl			; AL = Volume.
+	cmp	al, 64
+	ret
+
+FetchVolume	Endp
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FetchCommand	Proc	Near		; Returns: AL = Command
+					;	   AH = Command Info
+
+	mov	al, es:[bx+2]		; Fetch the command byte.
+	and	al, 0Fh 		; Extract the command byte.
+	mov	ah, es:[bx+3]		; Fetch the command info byte.
+	ret
+
+	Align 2
+
+FetchCommand	Endp
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+OrderFetch	Proc	Near
+
+	mov	ax, ModuleSeg
+	mov	es, ax
+	mov	RowCounter, 64
+	mov	bx, CurrentOrder
+	mov	al, es:[bx]
+	inc	bx
+	cmp	al, 99
+	jne	Short NoLoopInSong
+	mov	MusicWrapped, 1
+	mov	bx, 410h
+	mov	al, es:[bx]
+	inc	bx
+NoLoopInSong:
+	mov	CurrentOrder, bx
+	xor	ah, ah
+	shl	ax, 6
+	add	ax, ModuleSeg+49h
+	mov	CurrentRowSeg, ax
+	ret
+
+OrderFetch	Endp
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Dummy		Proc	Near		; Dummy procedure for command handling.
+
+	ret
+
+Dummy		Endp
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			  P r o g r a m   d a t a
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Tempo		DW	0
+TempoNumber	DW	60h
+RowCounter	DW	1
+CurrentOrder	DW	410h
+CurrentRowSeg	DW	0
+CommandCounter	DW	0
+CommandOrg	DW	0
+
+MusicWrapped	DB	0
+
+Channel1Off	DB	0
+Channel2Off	DB	0
+Channel3Off	DB	0
+Channel4Off	DB	0
+
+Info1		DB	0
+Info2		DB	0
+Info3		DB	0
+Info4		DB	0
+
+NoteHertz	Label	Word		; The note frequencies in Hertz.
+DW	2112
+DW	2244
+DW	2376
+DW	2508
+DW	2640
+DW	2816
+DW	3004
+DW	3191
+DW	3356
+DW	3520
+DW	3740
+DW	3960
+DW	4224
+DW	4488
+DW	4752
+DW	5016
+DW	5280
+DW	5632
+DW	6008
+DW	6381
+DW	6712
+DW	7040
+DW	7480
+DW	7920
+DW	8448	; MID-C. = C-2.
+DW	8976
+DW	9504
+DW	10032
+DW	10560
+DW	11264
+DW	12016
+DW	12672
+DW	13424
+DW	14080
+DW	14960
+DW	15840
+DW	16896
+DW	17952
+DW	19008
+DW	20064
+DW	21120
+DW	22528
+DW	24032
+DW	25344
+DW	26848
+DW	28160
+DW	29920
+DW	31680
+DW	33792
+DW	35904
+DW	38016
+DW	40128
+DW	42240
+DW	45056
+DW	48064
+DW	50688
+DW	53696
+DW	56320
+DW	59840
+DW	63360
+
+NoteFreqs	Label	Word
+DW	240 Dup (0)
+
+Volumes 	  Label      Byte
+include inc\volume.tbl
+;ÉÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍ»
+;º  Jump tables containing the offsets of the different parts of the command   º
+;º  parser.								       º
+;ÈÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍ¼
+FirstAddrs1	DW	Offset Dummy
+		DW	Offset A1
+		DW	Offset B1
+		DW	Offset C1
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+
+FirstAddrs2	DW	Offset Dummy
+		DW	Offset A2
+		DW	Offset B2
+		DW	Offset C1
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+
+FirstAddrs3	DW	Offset Dummy
+		DW	Offset A3
+		DW	Offset B3
+		DW	Offset C1
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+
+FirstAddrs4	DW	Offset Dummy
+		DW	Offset A4
+		DW	Offset B4
+		DW	Offset C1
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+		DW	Offset Dummy
+
+CmdAddrs1	DW	Offset Return1
+		DW	Offset Return1
+		DW	Offset Return1
+		DW	Offset Return1
+		DW	Offset D1
+		DW	Offset E1
+		DW	Offset F1
+		DW	Offset Return1
+		DW	Offset Return1
+		DW	Offset Return1
+		DW	Offset Return1
+		DW	Offset Return1
+		DW	Offset Return1
+		DW	Offset Return1
+		DW	Offset Return1
+
+
+CmdAddrs2	DW	Offset Return2
+		DW	Offset Return2
+		DW	Offset Return2
+		DW	Offset Return2
+		DW	Offset D2
+		DW	Offset E2
+		DW	Offset F2
+		DW	Offset Return2
+		DW	Offset Return2
+		DW	Offset Return2
+		DW	Offset Return2
+		DW	Offset Return2
+		DW	Offset Return2
+		DW	Offset Return2
+		DW	Offset Return2
+
+CmdAddrs3	DW	Offset Return3
+		DW	Offset Return3
+		DW	Offset Return3
+		DW	Offset Return3
+		DW	Offset D3
+		DW	Offset E3
+		DW	Offset F3
+		DW	Offset Return3
+		DW	Offset Return3
+		DW	Offset Return3
+		DW	Offset Return3
+		DW	Offset Return3
+		DW	Offset Return3
+		DW	Offset Return3
+		DW	Offset Return3
+
+CmdAddrs4	DW	Offset Return4
+		DW	Offset Return4
+		DW	Offset Return4
+		DW	Offset Return4
+		DW	Offset D4
+		DW	Offset E4
+		DW	Offset F4
+		DW	Offset Return4
+		DW	Offset Return4
+		DW	Offset Return4
+		DW	Offset Return4
+		DW	Offset Return4
+		DW	Offset Return4
+		DW	Offset Return4
+		DW	Offset Return4
+
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+EndOfCode	Label	Word
+

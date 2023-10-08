@@ -1,0 +1,875 @@
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º CALL:     1) SBC_Init     --> Initialize the Sound Blaster driver.	       º
+;º	     2) SBC_GetSpl   --> Called after loading each sample.	       º
+;º	     3) SBC_Start    --> Start playing the module or sample(s).        º
+;º	     4) SBC_Mixer    --> Mix the number of bytes specified.	       º
+;º	     5) SBC_Remove   --> Uninitialize the Sound Blaster driver.        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SBC_Driver	Segment Para Private Use16 'CODE'
+		Assume	CS:SBC_Driver, DS:SBC_Driver, ES:Nothing
+
+	.386
+
+	DB	4000 DUP (80h)
+
+	BPtr	EQU Byte Ptr
+	WPtr	EQU Word Ptr
+	DPtr	EQU Dword Ptr
+
+PUBLIC	SBC_Init, SBC_GetSpl, SBC_Start, SBC_Mixer, SBC_Remove
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º     ú	 ÛÛÛÛÛÛ ÛÛÛÛÛ  ÛÛÛÛÛÛ	.    ÛÛ  ÛÛÛÛÛÛ ÛÛ ÛÛÛÛÛÛ  .	   ú   º
+;º	   ú   . ÜÜ	ÜÜ ÛÛ  ÜÜ  ú	   . ÜÜ  ÜÜ  ÛÛ ÜÜ   ÜÜ        .       º
+;º	ù	 ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ      .     ÛÛ  ÛÛ  ÛÛ ÛÛ   ÛÛ  ú	    .  º
+;º  ú	     ú	    ÜÛÛ ÛÛÜ ÛÛ ÛÛÜ	     ÛÛÜ ÛÛÜ ÛÛ ÛÛÜ  ÛÛÜ    ú	       º
+;º	  .	 ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛ ÛÛÛ ÛÛ ÛÛÛ  ÛÛÛ	ù      º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the SBC_Init function:			       º
+;º									       º
+;º		DS = Segment of the  following info blocks;  usually the       º
+;º		     data or code segment of the frontend program.	       º
+;º									       º
+;º		SI = Pointer to the Device Info block.	Unneeded entries       º
+;º		     should be set to zero;  if some entry is set to -1,       º
+;º		     the value will be auto-detected by the SoundSystem.       º
+;º		     0 - Device number (3 = SB, 4 = SB Pro).		       º
+;º		     2 - Base Address for the device.			       º
+;º		     4 - IRQ line for the device.			       º
+;º		     6 - DMA channel for the device.			       º
+;º		     8 - SB Pro filter mode (0 = no change, 1 = on, 2 = off)   º
+;º									       º
+;º		DI = Pointer to the Playing Info block;  format follows:       º
+;º		     0 - Playing Mode (0 = AutoPlay, 1 = CallPlay).	       º
+;º		     2 - Calling Frequency in Hz (for CallPlay mode).	       º
+;º		     4 - Mixing Frequency in Hz (not needed for GUS).	       º
+;º		     6 - PT/NT Tempo Mode (0 = PT-mode, 1 = NT-mode).	       º
+;º		     8 - Octave Mode (0 = 3 octaves, 1 = 5 octaves).	       º
+;º		    10 - Module Type (-1 if not specified).		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SBC_Init	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs		; Save the segment regs.
+	mov	ax, ds			; AX = Seg addr of the info blocks.
+	mov	fs, ax			; Set FS to point the info blocks.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+
+		  ÚÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ´ Fetch the device specific information first ÃÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+		  ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÙ
+GetDevice:				; Get the playing device number.
+	mov	ax, fs:[si]		; First of all fetch the device num.
+	mov	DeviceNum, ax		; Save the playing device number.
+
+GetBaseAddr:				; Get the playing device address.
+	mov	dx, fs:[si+2]		; Fetch the given Base Address.
+	cmp	dx, -1			; Base Address detect requested?
+	jne	$+5			; Skip the address detect if not.
+	call	DetectBase		; Detect the card's Base Address.
+	mov	BaseAddr, dx		; Store the card's Base Address.
+	call	ResetSB 		; Then reset the SoundBlaster.
+
+GetIRQ: 				; Get the playing device IRQ.
+	mov	cx, fs:[si+4]		; Fetch the card's IRQ number.
+	mov	IRQ, cx 		; Store the IRQ number.
+	xor	ax, ax			; Request enable an IRQ.
+	call	IrqMasker		; Call the IRQ mask handler.
+	mov	ax, IRQ 		; Fetch the card's IRQ number.
+	add	ax, 8			; IRQ0 = Int8, IRQ1 = Int9, etc.
+	mov	ah, 35h 		; Set the function number in AH.
+	int	21h			; Get old int vector via DOS.
+	mov	OldIntOffs, bx		; Store offset of the old IRQ handler.
+	mov	OldIntSeg, es		; Store the old IRQ handler's segment.
+	lea	dx, SBlasterIRQ 	; Point DS:DX to the new IRQ handler.
+	mov	ah, 25h 		; Set the DOS function number in AH.
+	int	21h			; Set the new int vector via DOS.
+
+GetDMA: 				; Get the playing device DMA.
+	mov	ax, fs:[si+6]		; Fetch the SB's DMA channel.
+	mov	DMA, ax 		; Store the DMA channel number.
+
+GetFilterMode:				; Get the SB Pro filter status.
+	mov	ax, fs:[si+8]		; Fetch the SB Pro filter mode.
+	mov	FilterMode, ax		; Save the SB Pro filter mode.
+
+		   ÚÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ´ Then fetch some miscellaneous information ÃÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+		   ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÙ
+GetPlayMode:				; Get the desired playing mode.
+	mov	ax, fs:[di]		; Fetch the playing mode word.
+	mov	PlayMode, ax		; Save the playing mode word.
+
+GetCallFreq:				; Get the Vertical Blanking freq.
+	mov	ax, fs:[di+2]		; Fetch the mixer calling frequency.
+	mov	CallFreq, ax		; Call the SBC_Mixer at this rate.
+
+GetPlayFreq:				; Get the wanted playing freq.
+	mov	bx, fs:[di+4]		; Fetch the playing frequency.
+	mov	cl, 0FFh		; Set the default (SB) AND mask.
+	mov	ebp, 1000000		; Set the default (SB) dividend.
+	cmp	DeviceNum, 4		; Is the device SB Pro or SB?
+	jne	NormSB			; Skip if normal SoundBlaster.
+	shl	bx, 1			; In stereo - double the freq.
+	xor	cl, cl			; Set the AND mask for SB Pro.
+	mov	ebp, 256*1000000	; Set the SB Pro freq. dividend.
+NormSB: mov	eax, ebp		; Initialize EAX for division.
+	xor	edx, edx		; Zero the upper doubleword.
+	movzx	ebx, bx 		; Initialize the divisor.
+	div	ebx			; EAX = FreqDivisor / PlayFreq.
+	mov	ebx, eax		; Copy the result in the EBX.
+	and	bl, cl			; Clear BL if Device = SB Pro.
+	mov	eax, ebp		; Set EAX for another division.
+	xor	edx, edx		; And zero the upper dword.
+	div	ebx			; AX = The real PlayFreq.
+	cmp	DeviceNum, 4		; Is the device SB Pro or SB?
+	jne	$+4			; Skip if normal SoundBlaster.
+	shr	ax, 1			; In stereo - normalize the freq.
+	mov	fs:[di+4], ax		; Update the original PlayFreq.
+	mov	PlayFreq, ax		; Store the final PlayFreq.
+
+CalcSlideCntr:				; Calculate the cmd update freq.
+	mov	bx, 50			; Tick freq. by default = 50Hz.
+	mov	ax, PlayFreq		; Get playing Frequency in AX.
+	xor	dx, dx			; Zero the DX before division.
+	div	bx			; AX = Command Update Counter.
+	mov	SlideCntr, ax		; Save the resulting counter.
+	mov	SlideCntrOrg, ax	; Save a backup copy of it.
+
+CalcMixCount:				; Calculate the mix count.
+	xor	dx, dx			; Clear the DX for division.
+	mov	ax, PlayFreq		; Fetch the playing frequency.
+	div	CallFreq		; Divide it by the retrace freq.
+	add	ax, 4			; Round up by four extra bytes.
+	and	ax, 0FFFCh		; Count is now dividable by four.
+	mov	MixCount, ax		; Save the retrace mixing count.
+
+AllDone:				; Initialization completed.
+	pop	fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	ret				; Return.
+
+SBC_Init	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º     ù   ÛÛÛÛÛÛ ÛÛÛÛÛ  ÛÛÛÛÛÛ     ú  ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛ ÛÛÛÛÛÛ   ú   º
+;º  .	   ÜÜ	  ÜÜ ÛÛ  ÜÜ ú	 ù     ÜÜ	ÜÜ . ÜÜ  ÛÛ ßß ÛÛ   ÜÜ	 .   ú º
+;º	   ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ	  .  ú ÛÛÛÛÛÛ	ÛÛ   ÛÛÛÛÛÛ ÛÛÛÛÛÛ  ÛÛ	       º
+;º	.     ÜÛÛ ÛÛÜ ÛÛ ÛÛÜ ú		  ÜÛÛ ú ÛÛÜ  ÛÛÜ ÛÛ ÛÛÜ ÛÛ  ÛÛÜ   ú    º
+;º  ú	   ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ	ÛÛÛ  ÛÛÛ ÛÛ ÛÛÛ ÛÛ  ÛÛÛ    ú   º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the SBC_Start function:			       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SBC_Start	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	ds			; Save the data segment.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	xor	dx, dx			; Request play forward.
+	mov	bx, PlayFreq		; Fetch the playing frequency.
+	call	SetDMASpeed		; Program the DMA -> DSP speed.
+	cmp	DeviceNum, 4		; Is the device SB Pro or SB?
+	jne	$+5			; Skip if normal SoundBlaster.
+	call	SetStereo		; Set the SB Pro in Stereo mode.
+	call	SpeakerOn		; Turn on SB's speaker output.
+	pushf				; Push the flags into the stack.
+	push	cs			; Emulate interrupt; push CS.
+	call	SBlasterIRQ		; Call the SB IRQ handler.
+	pop	ds			; Restore the data segment.
+	popad				; Restore all 32-bit regs.
+	ret				; Return.
+
+SBC_Start	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º .   ÛÛÛÛÛÛ ÛÛÛÛÛ  ÛÛÛÛÛÛ  .	 ú ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ .   ú º
+;º     ÜÜ     ÜÜ ÛÛ  ÜÜ        ú   ÜÜ	  ÜÜ   ú   ÜÜ	ÜÜ     ÜÜ  ÛÛ ÜÜ   ú   º
+;º   ú ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ ù     ú    ÛÛ ÛÛÛ ÛÛÛÛ	 . ÛÛ	ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ  ù    º
+;º  ù	  ÜÛÛ ÛÛÜ ÛÛ ÛÛÜ	 ú ÛÛÜ ÛÛ ÛÛÜ	   ÛÛÜ	   ÜÛÛ ÛÛÜ .  ÛÛÜ   ú  º
+;º     ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ   ÛÛÛ	ÛÛÛÛÛÛ ÛÛÛ    ÛÛÛÛÛÛ   º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the SBC_GetSpl function: 		       º
+;º									       º
+;º		EDX = Offset of the sample to handle.			       º
+;º		EAX = Length of the sample to handle.			       º
+;º									       º
+;º OUTPUT:	EDX = Offset where to load the next sample.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SBC_GetSpl	Proc	Far
+
+	add	edx, eax		; Sample Start + Sample Length.
+	test	edx, 0Fh		; Offset already paragraph-aligned?
+	jz	Aligned 		; No further action if it is.
+	add	edx, 10h		; Round up to next paragraph.
+	and	dl, 0F0h		; Clear the four lowmost bits.
+Aligned:
+	ret				; Go load the next one.
+
+SBC_GetSpl	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º .   ú   ÛÛÛÛÛÛ ÛÛÛÛÛ  ÛÛÛÛÛÛ ú  ú   ÛÛÛÛÛÛÛ ÛÛ  ÛÛ  ÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛ	ú    ù º
+;º    ù    ÜÜ	  ÜÜ ÛÛ  ÜÜ .	    ù  ÜÜ Û ÛÛ ÜÜ  ÜÜ  ÛÛ ÜÜ   ú ßß ÛÛ	  .    º
+;º  ú	   ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ  ú	  ú    ÛÛ Û ÛÛ ÛÛ   ßÛÛÜ  ÛÛÛÛ	 ÛÛÛÛÛÛ     ú  º
+;º   .	ú     ÜÛÛ ÛÛÜ ÛÛ ÛÛÜ	       ÛÛÜ  ÛÛ ÛÛÜ ÛÛÜ ÛÛ ÛÛÜ	 ÛÛÜ ÛÛ  ú   ú º
+;º .	   ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛ  ÛÛ ÛÛÛ ÛÛÛ ÛÛ ÛÛÛÛÛÛ ÛÛÛ ÛÛ    ú   º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the SBC_Mixer function:			       º
+;º									       º
+;º		FS = Segment where the volume table and the Channel Info       º
+;º		     blocks are located; usually SEG SoundSys. NOTE: The       º
+;º		     volume table *MUST*  be located at the beginning of       º
+;º		     the segment!					       º
+;º									       º
+;º		SI = Offset of the first  Channel Info block.  The block       º
+;º		     structure is defined in the main Sound System. Each       º
+;º		     entry of the table is referred to like fs:[si+equ],       º
+;º		     where 'equ' is an offset  from the beginning of the       º
+;º		     array. The needed equates are defined at the end of       º
+;º		     the device drivers.				       º
+;º									       º
+;º		BP = Length of a Channel Info block in bytes.		       º
+;º									       º	      º
+;º		DX = Number of channels to mix. 			       º
+;º									       º
+;º OUTPUT:	CF = 1 if playing parameter updating is requested; in	       º
+;º		practice,  that  means	calling the PatternParser and	       º
+;º		the effect command handlers,  which  will  update the	       º
+;º		channel info blocks, and then calling SB_Mixer again,	       º
+;º		with the same FS, SI, BP and CX values as before.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SBC_Mixer	Proc	Far
+
+	cld				; Clear the direction flag.
+	pushad				; Save all 32-bit registers.
+	push	es ds			; Save the segment registers.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	mov	es, ax			; Set ES to point it as well.
+;
+	mov	SlideCntrOrg, bx
+;
+	cmp	MixBufCount, 0		; Mixing not completed yet?
+	jnz	MixSomeMore		; Go mix some more if so.
+
+	mov	bx, NextToMix		; Fetch number of buffer to fill.
+	mov	ax, FreeBuffer		; Fetch the free buffer number.
+	cmp	ax, bx			; Referencing the same buffer?
+	jne	MixingDone		; No mixing if not ready yet.
+	imul	bx, 1000		; Point to either CS:0 or CS:1000.
+	add	bx, MixBufReloc 	; Relocate the mix buffer.
+	mov	cx, MixCount		; Fetch the mixing byte count.
+	mov	MixBufOffs, bx		; Save the current buffer offset.
+	mov	MixBufCount, cx 	; Save the number of bytes to mix.
+	mov	di, bx			; Copy the final offset to DI.
+	cmp	DeviceNum, 4		; Is the device SB Pro or SB?
+	je	$+4			; Skip if SoundBlaster Pro.
+	shr	cx, 1			; Make it number of words.
+	shr	cx, 1			; Make it number of dwords.
+	mov	eax, 80808080h		; Clear the buffer with 80h.
+	rep	stosd			; Flush the mixing buffer.
+
+MixSomeMore:
+	mov	ax, SlideCntr		; Get the SlideCounter in AX.
+	mov	bx, MixBufCount 	; And the mixing count in BX.
+	cmp	ax, bx			; Compare the first two counts.
+	jbe	$+3			; Skip if AX is the smaller one.
+	xchg	bx, ax			; Exchange the counts; now AX < BX.
+	mov	cx, ax			; CX = Number of bytes to mix.
+
+MixNext:
+	mov	di, MixBufOffs		; Get the mixing offset in DI.
+	cmp	DeviceNum, 4		; Is the device SB Pro or SB?
+	jne	MixIt			; Skip if normal SoundBlaster.
+	test	dl, 2			; Check whether it is a right channel.
+	jne	$+3			; If not, no change.
+	inc	di			; It's right, mix to odd bytes.
+MixIt:	call	MixChannel		; Mix the current channel.
+	add	si, bp			; SI --> Next channel info block.
+	dec	dx			; Decrement the channel counter.
+	jnz	MixNext 		; Loop until all channels mixed.
+
+	add	MixBufOffs, cx		; Set the mixer's new starting offset.
+	cmp	DeviceNum, 4		; Is the device SB Pro or SB?
+	jne	$+6			; Skip if normal SoundBlaster.
+	add	MixBufOffs, cx		; For SB Pro, add it twice.
+	sub	SlideCntr, cx		; Sub the byte count from SlideCounter.
+	sub	MixBufCount, cx 	; Desired # of bytes mixed already?
+	jnz	GoHandleCommands	; If not, then go handle commands.
+	xor	NextToMix, 1		; Switch active buffer & quit mixing.
+	cmp	SlideCntr, 0		; Time to handle commands as well?
+	jz	GoHandleCommands	; If so, get back to SoundSys.
+
+MixingDone:
+	pop	ds es			; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	clc				; Quit mixing: clear CF.
+	ret				; Then return.
+
+GoHandleCommands:
+	mov	ax, SlideCntrOrg	; Fetch the original slide counter.
+	mov	SlideCntr, ax		; Restore the current slide counter.
+	pop	ds es			; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	stc				; Go handle commands: set CF.
+	ret				; Let the Sound System handle cmds.
+
+SBC_Mixer	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º  ú ÛÛÛÛÛÛ ÛÛÛÛÛ  ÛÛÛÛÛÛ ú   .  ÛÛÛÛÛ  ÛÛÛÛÛÛ ÛÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛú ÛÛ ÛÛÛÛÛÛ ú º
+;º    ÜÜ     ÜÜ ÛÛ  ÜÜ ú     .	  ßß ÛÛ  ÜÜ   ú ÜÜ Û ÛÛ ÜÜ  ÛÛ ÜÜ  ÛÛ ÜÜ       º
+;º ú  ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ	ú      ú  ÛÛÛÛÛÛ ÛÛÛÛ	ÛÛ Û ÛÛ ÛÛ  ÛÛ ÛÛ  ÛÛ ÛÛÛÛ ú   º
+;º	 ÜÛÛ ÛÛÜ ÛÛ ÛÛÜ    ú	  ÛÛÜ ÛÛ ÛÛÜ ú	ÛÛÜ  ÛÛ ÛÛÜ ÛÛ ÛÛÜ ÛÛ ÛÛÜ    ù º
+;º   úÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛ ÛÛ ÛÛÛÛÛÛ ÛÛÛ  ÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛß ÛÛÛÛÛÛ   º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	No parameters required for the SBC_Remove procedure.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SBC_Remove	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	ds			; Save the data segment.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	mov	dx, BaseAddr		; Fetch the SB's base I/O addr.
+	add	dx, 0Ch 		; Point the SB command port.
+	mov	al, 0D3h		; Set a command byte in AL.
+	out	dx, al			; Turn the speaker OFF.
+	mov	dx, BaseAddr		; Fetch the SB's base I/O addr.
+	call	ResetSB 		; Reset the Sound Blaster.
+	mov	cx, IRQ 		; Fetch the SB's IRQ number.
+	mov	ax, 1			; Request disable an IRQ.
+	call	IrqMasker		; Call the IRQ mask handler.
+	mov	ax, IRQ 		; Fetch the SB's IRQ number.
+	add	ax, 8			; IRQ0 = Int8, IRQ1 = Int9, etc.
+	mov	ah, 25h 		; Set the function number in AH.
+	lds	dx, OldSbInt		; Point DS:DX to the old int vector.
+	int	21h			; Restore the original int handler.
+	pop	ds			; Restore the data segment.
+	popad				; Restore all 32-bit regs.
+	ret				; Return.
+
+SBC_Remove	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+CheckCmdStatus	Macro			; This one checks the 'SB ready' bit.
+
+	in	al, dx			; Fetch the cmd port's contents.
+	add	al, al			; Is the highest bit on?
+	jc	$-3			; Wait until it's off.
+
+	EndM
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AX = The request: 0 = Enable IRQ, 1 = Disable IRQ.	       º
+;º		CX = The number of the IRQ to enable or disable.	       º
+;º FUNCTION:	This routine enables/disables IRQs.			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+IrqMasker	Proc	Near
+
+	cli				; Disable external interrupts.
+	or	ax, ax			; Which operation requested?
+	jz	EnableIrq		; Skip if enable requested.
+	shl	ax, cl			; Shift bit to correct position.
+	mov	ah, al			; Save the result.
+	in	al, 21h 		; Fetch the current IRQ mask.
+	or	al, ah			; Disable the requested IRQ.
+	out	21h, al 		; Send the new IRQ mask back.
+	sti				; Enable external interrupts.
+	ret				; Return.
+EnableIrq:
+	mov	ah, 1			; Set the basic IRQ mask in AH.
+	shl	ah, cl			; Shift bit to correct position.
+	not	ah			; Create the final IRQ mask.
+	in	al, 21h 		; Fetch the current IRQ mask.
+	and	al, ah			; Enable the requested IRQ.
+	out	21h, al 		; Send the new IRQ mask back.
+	sti				; Enable external interrupts.
+	ret				; Return.
+
+IrqMasker	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DX = The base I/O address of the Sound Blaster. 	       º
+;º FUNCTION:	This routine initializes the Sound Blaster.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ResetSB 	Proc	Near
+
+	mov	al, 1			; Set AL = The first init code.
+	add	dx, 6			; Point the DSP reset port.
+	out	dx, al			; Send the first reset code.
+	mov	cx, 5000		; Set the delay count to 5000.
+	loop	$			; Give some time for the DSP.
+	dec	al			; Clear the AL.
+	out	dx, al			; Send the second reset code.
+	mov	cx, 5000		; Set the delay count to 5000.
+	loop	$			; Give some time for the DSP.
+	add	dx, 8			; Point the SB status port.
+	in	al, dx			; Clear the SB IRQ.
+	sub	dx, 4			; Point the SB read data port.
+	in	al, dx			; Fetch a byte from it.
+	add	dx, 2			; Point the SB command port.
+	CheckCmdStatus			; Wait until the DSP is ready.
+	ret				; Return.
+
+ResetSB 	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º FUNCTION:	This routine sets the SB Pro into Stereo mode.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SetStereo	Proc	Near
+
+	mov	dx, BaseAddr		; Fetch the SBPro's base I/O addr.
+	add	dx, 04h 		; Point to SBPro mixer command reg.
+	mov	al, 0Eh 		; Request stereo/filter enable.
+	out	dx, al			; Send the request.
+	inc	dx			; Point to SBPro mixer data reg.
+	in	al, dx			; Read the current value.
+	or	al, 02h 		; Put to stereo mode.
+	cmp	FilterMode, 1		; Should we set the filter on?
+	je	FilterOn		; If yes, go send the command byte.
+	cmp	FilterMode, 2		; Let's see if we should put it off.
+	je	FilterOff		; If yes, then go put the filter off.
+	ret				; No filter status change; return.
+FilterOn:
+	and	al, not 20h		; Assume option 1, put filter on.
+	out	dx, al			; Send the new mode byte.
+	ret				; Return.
+FilterOff:
+	or	al, 20h 		; Put filter off.
+	out	dx, al			; Send the new mode byte.
+	ret				; Return.
+
+SetStereo	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º FUNCTION:	This routine turns on the SoundBlaster speaker output.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SpeakerOn	Proc
+
+	mov	dx, BaseAddr		; Fetch the card's base I/O addr.
+	add	dx, 0Ch 		; Point the card command register.
+	CheckCmdStatus			; Wait until the card is ready.
+	mov	al, 0D1h		; Set a command byte in the AL.
+	out	dx, al			; Turn the speaker on.
+	CheckCmdStatus			; Wait until the SB "got it".
+	ret
+
+SpeakerOn	Endp
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º RETURNS:	DX = port address (220h if not found).			       º
+;º FUNCTION:	Detects the SoundBlaster base IO-port address.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DetectBase	Proc   Near
+
+	mov	bx, 210h		; BX = The first base addr.
+TestNextAddr:
+	mov	dx, bx			; DX = The current SB base addr.
+	add	dl, 0Ch 		; Point the write status port.
+	mov	ah, 0D3h		; AH = Speaker off code.
+	mov	cx, 200h		; Wait 200 times.
+Wait1:	in	al, dx			; Get a byte from the status port.
+	or	al, al			; Set flags.
+	jns	Ready1			; Jump if buffer ready (bit 7 = 0).
+	loop	Wait1			; Try again.
+	jmp	SBNext			; No response - try the next address.
+Ready1: mov	al, ah			; AL = Turn speaker off code.
+	out	dx, al			; Send the code.
+	mov	cx, 0FFFFh		; Wait a moment (DSP is s-l-o-w).
+	loop	$
+	sub	dl, 0Ch-06h		; Point the DSP reset port.
+	mov	al, 01h 		; AL = The first reset code.
+	out	dx, al			; Send the code.
+	mov	cx, 0FFFFh		; Wait a moment (DSP is s-l-o-w).
+	loop	$
+	xor	al, al			; Clear the AL.
+	out	dx, al			; Send the second reset code.
+	mov	cx, 10h 		; Test 10 times.
+	add	dl, 0Eh-06h		; Point the data waiting status port.
+TestLp: push	cx			; Save the CX register.
+	mov	cx, 200h		; Test 200 times.
+Wait2:	in	al, dx			; Get the status byte.
+	or	al, al			; Set flags.
+	js	Ready2			; Jump if data waiting (bit 7 = 1).
+	loop	Wait2			; Try again.
+	jmp	SBNext			; No response - try the next address.
+Ready2: sub	dl, 0Eh-0Ah		; Point the ADC data port.
+	in	al, dx			; Get the data byte.
+	pop	cx			; Restore the CX register.
+	add	dl, 0Eh-0Ah		; Point to data waiting status port.
+	cmp	al, 0AAh		; Is the byte 0AAh?
+	je	SBFound 		; Yes, this is the right address!
+	loop	TestLp			; No, try again.
+SBNext: add	bx, 10h 		; BX = The next base addr.
+	cmp	bx, 260h		; Have all addresses been tested?
+	jbe	TestNextAddr		; No, go and test the next one.
+	mov	dx, 220h		; No SB found - use 220h as default...
+	ret				; ...just in case...
+SBFound:
+	mov	dx, bx			; Return the port addr. in DX.
+	ret
+
+DetectBase	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	BX = The playing frequency.				       º
+;º		DX = The direction of play: 0 = forward, 1 = backward.	       º
+;º FUNCTION:	Programs the DMA transfer speed in the DSP.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SetDMASpeed	Proc	Near
+
+	mov	al, 05h 		; Set the DMA mask in the AL.
+	out	0Ah, al 		; Mask the DMA channel #1.
+	mov	ax, 49h 		; Set the playing parameters.
+	shl	dx, 5			; Multiply the mode by 20h.
+	add	ax, dx			; Then add it to the AX.
+	out	0Bh, al 		; Set the playing direction.
+	mov	ax, cs			; Fetch the CS value.
+	movzx	eax, ax 		; Zero-extend the AX into EAX.
+	mov	cx, ax			; Copy it temporarily to CX.
+	shl	cx, 4			; Discard the highest nibble.
+	add	cx, 2000		; Check for DMA address wrap.
+	mov	ecx, 0			; Default = No relocation.
+	jnc	$+5			; Skip if DMA page not crossed.
+	mov	cx, 2000		; Relocate the mixing buffer.
+	mov	MixBufReloc, cx 	; Use the second mixing buffer.
+	shl	eax, 4			; Convert it into absolute addr.
+	add	eax, ecx		; Relocate the mixing buffer.
+	shr	eax, 16 		; Fetch the DMA page number.
+	out	83h, al 		; Pre-initialize the DMA page.
+	mov	al, 01h 		; Set the DMA mask in the AL.
+	out	0Ah, al 		; Unmask the DMA channel #1.
+;			     ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Initialize the DSP ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			     ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+	mov	dx, BaseAddr		; Fetch the card's base I/O addr.
+	add	dx, 0Ch 		; Point the card command register.
+	CheckCmdStatus			; Wait until the card is ready.
+	mov	al, 40h 		; Request set transfer speed.
+	out	dx, al			; Send the xfer speed request.
+	CheckCmdStatus			; Wait until the card is ready.
+	mov	bp, dx			; Save the card's base I/O addr.
+	cmp	DeviceNum, 4		; Is the device SB Pro or SB?
+	je	InitPro 		; Check which one to initialize.
+
+InitNorm:
+	mov	eax, 1000000		; EAX = 1'000'000 = the divisor.
+	xor	edx, edx		; Clear the upper dword of divisor.
+	movzx	ebx, bx 		; Ensure that upper word is zero.
+	div	ebx			; Divide EDX:EAX by the PlayFreq.
+	neg	ax			; AL = 256 - (10^6 / PlayFreq).
+	mov	dx, bp			; Fetch the card's command addr.
+	out	dx, al			; Send the output speed byte.
+	CheckCmdStatus			; Wait until the SB is ready.
+	ret				; Return to StartPlay function.
+
+InitPro:
+	mov	eax, 256*1000000	; EAX = 256'000'000 = the divisor.
+	xor	edx, edx		; Clear the upper dword of divisor.
+	movzx	ebx, bx 		; Ensure that upper word is zero.
+	shl	bx, 1			; Stereo, twice the actual freq.
+	div	ebx			; Divide EDX:EAX by the PlayFreq.
+	neg	ax			; AX = 65536-(256*10^6/PlayFreq).
+	mov	al, ah			; Discard the low byte of result.
+	mov	dx, bp			; Fetch the card's command addr.
+	out	dx, al			; Send the output speed byte.
+	CheckCmdStatus			; Wait until the card is ready.
+	ret				; Return to StartPlay function.
+
+SetDMASpeed	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	EBX = The 20-bit DMA start address (segment * 16).	       º
+;º		 CX = The DMA transfer byte count.			       º
+;º FUNCTION:	Starts the DMA transfer.				       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DMAPlayHandler	Proc	Near
+
+	mov	al, 05h 		; Set the DMA channel #1 mask.
+	out	0Ah, al 		; Send it to the DMA controller.
+	mov	eax, ebx		; Fetch the 20-bit DMA address.
+	out	02h, al 		; Send the DMA address low byte.
+	shr	eax, 8			; Fetch the address high byte.
+	out	02h, al 		; Send the DMA addr high byte.
+	mov	ax, cx			; Set the DMA count in the AX.
+	out	03h, al 		; Send the DMA count low byte.
+	mov	al, ah			; Fetch the DMA count high byte.
+	out	03h, al 		; Send it to the DMA controller.
+	mov	al, 01h 		; Set the DMA channel #1 mask.
+	out	0Ah, al 		; Unmask the DMA channel one.
+	ret				; Return.
+
+DMAPlayHandler	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SBlasterIRQ	Proc	Interrupt
+
+	push	ds			; Save the DS.
+	push	dx			; Save the DX.
+	push	eax			; Save the EAX.
+	push	ebx			; Save the EBX.
+	push	ecx			; Save the ECX.
+	xor	eax, eax		; Clear the EAX.
+	mov	dx, cs:BaseAddr 	; Get the card's base address.
+	add	dx, 0Eh 		; Point to the read data port.
+	in	al, dx			; Acknowledge the card's IRQ.
+	mov	ax, cs			; Fetch current code segment.
+	mov	ds, ax			; Copy the code segment to DS.
+	shl	eax, 4			; Convert it into a DMA address.
+	movzx	ebx, FreeBuffer 	; Get the number of buffer to play.
+	movzx	ecx, MixBufReloc	; Get the buffer relocation offset.
+	imul	ebx, 1000		; Point EBX to either CS:0 or 1000.
+	add	ebx, eax		; EBX points to buffer to play.
+	add	ebx, ecx		; Relocate the mixing buffer.
+	mov	cx, MixCount		; Fetch the # of bytes to play.
+	cmp	DeviceNum, 4		; Is the device SB or SB Pro?
+	jne	$+4			; Skip if device is SoundBlaster.
+	shl	cx, 1			; Twice the amount of bytes for Pro.
+	dec	cx			; Adjust the output byte count.
+	xor	FreeBuffer, 1		; Flip the free buffer pointer.
+	call	DMAPlayHandler		; Initialize the DMA transfer.
+	mov	dx, BaseAddr		; Fetch the card's base address.
+	add	dx, 0Ch 		; Point the card's command port.
+	mov	al, 14h 		; Set the default SB requester.
+	cmp	DeviceNum, 4		; Is the device SB or SB Pro?
+	jne	$+4			; Skip if device is SoundBlaster.
+	mov	al, 48h 		; Request set byte transfer count.
+	out	dx, al			; Send the command to the card.
+	CheckCmdStatus			; Wait until the card is ready.
+	mov	ax, cx			; Set AX = the byte count.
+	out	dx, al			; Send the low byte first.
+	CheckCmdStatus			; Wait until the card is ready.
+	mov	al, ah			; Fetch the count high byte.
+	out	dx, al			; Send it; byte count set.
+	CheckCmdStatus			; Wait until the card is ready.
+	cmp	DeviceNum, 4		; Is the device SB or SB Pro?
+	jne	$+5			; Skip if device is SoundBlaster.
+	mov	al, 91h 		; Request to begin High-speed DMA.
+	out	dx, al			; SB Pro now finally initialized.
+	mov	al, 20h 		; End-of-interrupt request.
+	out	20h, al 		; Send it to the PIC.
+	pop	ecx			; Restore the ECX.
+	pop	ebx			; Restore the EBX.
+	pop	eax			; Restore the EAX.
+	pop	dx			; Restore the DX.
+	pop	ds			; Restore the DS.
+	iret				; Interrupt return.
+
+SBlasterIRQ	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DI = Pointer to the destination buffer for the mixed bytes.    º
+;º		CX = Number of bytes to mix into the mixing buffer.	       º
+;º FUNCTION:	Mixes requested number of bytes from one channel.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MixChannel	Proc	Near
+
+	push	cx dx si bp		; Save the regs needed by mixer.
+	mov	TempCount, cx		; Number of bytes to mix right now.
+	mov	TempOffset, di		; Where to mix the bytes this time.
+	mov	ebp, fs:[si.InstrPtr]	; BP = SamplePtr, EBP.H = Accumulator.
+	mov	edx, fs:[si.CurAcc]	; Fetch the accumulator for the sample.
+	mov	ax, fs:[si.Curlen]	; Get the length of the sample in AX.
+	cmp	bp, ax			; End of the sample reached yet?
+	jnb	ChannelDone		; Skip the whole mixing if yes.
+	xor	ebx, ebx		; Clear out the paragraph count first.
+	shl	eax, 16 		; Rotate the sample length into EAX.H.
+	ror	ebp, 16 		; Swap the accumulator & offset words.
+	ror	edx, 16 		; Fractional part down, whole part up.
+	shl	edx, 4			; Multiply the accumulator by sixteen.
+	shr	cx, 4			; Get the maximum number of paragraphs.
+	jz	FinalMix		; Skip if MixCount smaller than 16.
+GetParaNum:				; Get the number of paragraphs to mix.
+	add	ebp, edx		; Accumulate it sixteen times at once.
+	cmp	ebp, eax		; Did we reach end-of-instrument yet?
+	jnb	FinalMix		; Jump if no paragraphs left anymore.
+	add	ebx, 10000h		; Increment the full-paragraph count.
+	sub	TempCount, 16		; Decrement the MixCount accordingly.
+	loop	GetParaNum		; Compute the # of 16-byte chunks.
+
+FinalMix:
+	cmp	DeviceNum, 4		; Is the device normal SB or SB Pro?
+	jne	$+7			; Select which mixing loop to use.
+	call	MixLoopPro		; Call the SB Pro mixing loop.
+	jmp	ChannelDone		; Current channel now completed.
+	call	MixLoopSB		; Call the normal SB mixing loop.
+
+ChannelDone:
+	mov	fs:[si.InstrPtr], ebp	; Save updated offset to the sample.
+	pop	bp si dx cx		; Restore the regs needed by mixer.
+	ret				; Return to the mixer.
+
+MixChannel	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+MixLoopSB	Proc	Near
+
+	les	ebp, fs:[si.InstrPtr]	; ES:BP -> Sample, EBP.H = Accumulator.
+	mov	edx, fs:[si.CurAcc]	; Fetch the accumulator for the sample.
+	mov	bh, fs:[si.CurVol]	; Get the current sample volume in BH.
+	mov	di, TempOffset		; Fetch pointer to the mixing buffer.
+	sub	ebx, 10000h		; Decrement the paragraph count
+	js	MixTheRest		; Jump if chunk count was zero.
+
+MixChunk:				; - / Mix a number of 16-byte chunks.
+	REPT	8			; - / Unroll the MixLoop partially.
+	add	ebp, edx		; 2 / First add the accumulator.
+	adc	bp, 0			; 2 / Handle the possible carry.
+	mov	bl, es:[bp]		; 4 / Fetch a byte from the sample.
+	mov	al, fs:[bx]		; 4 / Scale it according to volume.
+	add	ebp, edx		; 2 / Add the accumulator again.
+	adc	bp, 0			; 2 / Handle the possible carry.
+	mov	bl, es:[bp]		; 4 / Fetch a byte from the sample.
+	mov	ah, fs:[bx]		; 4 / Scale it according to volume.
+	add	[di], ax		; 6 / Mix both bytes with other chnls.
+	add	di, 2			; 2 / Point to the next word in buffer.
+	ENDM				; - / Each pass mixes a 16-byte chunk.
+	sub	ebx, 10000h		; 2 / Decrement the total chunk count.
+	jns	MixChunk		; 9 / Loop until all paragraphs mixed.
+
+MixTheRest:				; Mix the rest of the sample bytes.
+	mov	ax, fs:[si.Curlen]	; Fetch the sample end offset in AX.
+	mov	cx, TempCount		; Fetch the number of remaining bytes.
+	or	cx, cx			; Check that the mixcount is not zero.
+	jnz	MixByte 		; Go mix the remaining bytes if not.
+	ret				; Bail out right now if it is zero.
+
+MixByte:				; - / Mix just one byte per pass.
+	add	ebp, edx		; 2 / Add the sample accumulator.
+	adc	bp, 0			; 2 / Handle the possible carry.
+	cmp	bp, ax			; 2 / End of instrument reached?
+	jnb	InstrEnd		; 3 / Go handle the loop if so.
+Cont:	mov	bl, es:[bp]		; 4 / Fetch a byte from the sample.
+	mov	bl, fs:[bx]		; 4 / Scale it according to the volume.
+	add	[di], bl		; 2 / Mix the byte with other channels.
+	inc	di			; 2 / Point to the next byte in buffer.
+	dec	cx			; 2 / Decrement the loop counter.
+	jnz	MixByte 		; 9 / Go handle the next byte.
+	ret				; - / This channel completed.
+
+InstrEnd:				; End of an instrument reached.
+	call	HandleLoop		; Handle the instrument looping.
+	jnc	Cont			; Continue mixing if CF cleared.
+	ret				; Otherwise no more bytes to mix.
+
+MixLoopSB	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+MixLoopPro	Proc	Near
+
+	les	ebp, fs:[si.InstrPtr]	; ES:BP -> Sample, EBP.H = Accumulator.
+	mov	edx, fs:[si.CurAcc]	; Fetch the accumulator for the sample.
+	mov	bh, fs:[si.CurVol]	; Get the current sample volume in BH.
+	mov	di, TempOffset		; Fetch pointer to the mixing buffer.
+	sub	ebx, 10000h		; Decrement the paragraph count
+	js	MixTheRestPro		; Jump if chunk count was zero.
+
+MixChunkPro:				; - / Mix a number of 16-byte chunks.
+	REPT	8			; - / Unroll the MixLoop partially.
+	add	ebp, edx		; 2 / Add the accumulator.
+	adc	bp, 0			; 2 / Handle the possible carry.
+	mov	bl, es:[bp]		; 4 / Fetch a byte from the sample.
+	mov	al, fs:[bx]		; 4 / Scale it according to the volume.
+	add	ebp, edx		; 2 / Add the accumulator.
+	adc	bp, 0			; 2 / Handle the possible carry.
+	mov	bl, es:[bp]		; 4 / Fetch a byte from the sample.
+	mov	ah, fs:[bx]		; 4 / Scale it according to the volume.
+	add	[di], al		; 2 / Mix the byte with other channels.
+	add	[di+2], ah		; 2 / Mix the other byte
+	add	di, 4			; 2 / Point to the next word in buffer.
+	ENDM				; - / Each pass mixes a 16-byte chunk.
+	sub	ebx, 10000h		; 2 / Decrement the total chunk count.
+	jns	MixChunkPro		; 9 / Loop until all paragraphs mixed.
+
+MixTheRestPro:				; Mix the rest of the sample bytes.
+	mov	ax, fs:[si.Curlen]	; Fetch the sample end offset in AX.
+	mov	cx, TempCount		; Fetch the number of remaining bytes.
+	or	cx, cx			; Check that the mixcount is not zero.
+	jnz	MixBytePro		; Go mix the remaining bytes if not.
+	ret				; Bail out right now if it is zero.
+
+MixBytePro:				; - / Mix just one byte per pass.
+	add	ebp, edx		; 2 / Add the sample accumulator.
+	adc	bp, 0			; 2 / Handle the possible carry.
+	cmp	bp, ax			; 2 / End of instrument reached?
+	jnb	InstrEndPro		; 3 / Go handle the loop if so.
+ContPro:mov	bl, es:[bp]		; 4 / Fetch a byte from the sample.
+	mov	bl, fs:[bx]		; 4 / Scale it according to the volume.
+	add	[di], bl		; 2 / Mix the byte with other channels.
+	add	di, 2			; 2 / Point to the next word in buffer.
+	dec	cx			; 2 / Decrement the loop counter.
+	jnz	MixBytePro		; 9 / Go handle the next byte.
+	ret				; - / This channel completed.
+
+InstrEndPro:
+	call	HandleLoop		; Handle the instrument looping.
+	jnc	ContPro 		; Continue mixing if CF cleared.
+	ret				; Otherwise no more bytes to mix.
+
+MixLoopPro	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+HandleLoop	Proc	Near
+
+	cmp	WPtr fs:[si.ExtraLen],0 ; Is the length of sample over 64 kB?
+	jnz	LongInst		; Jump if sample is over 64 kB long.
+	cmp	BPtr fs:[si.Repeat], 1	; Is the instrument looped or not?
+	je	ResetLoop		; Go reset the loop if it is.
+	mov	DPtr fs:[si.CurAcc], 0	; Zero out the accumulator.
+	mov	bp, fs:[si.CurLen]	; Fetch the InstrLen in BP.
+	stc				; Set the carry; done.
+	ret				; Mixing completed.
+ResetLoop:
+	mov	bp, fs:[si.RepeatTo]	; Fetch the loop end offset.
+	mov	ax, bp			; Set the end offset in AX.
+	mov	fs:[si.CurLen], bp	; Set it to be end of the spl.
+	mov	bp, fs:[si.RepeatFrom]	; Fetch the loop start offset.
+	clc				; Clear the CF; not ready.
+	ret				; Go mix some more bytes.
+LongInst:
+	mov	ax, es			; Fetch the current sample segment.
+	add	ax, 1000h		; Point to the next 64 kB block.
+	mov	es, ax			; Set the new value as CurSplSeg.
+	mov	fs:[si.InstrSeg], ax	; Save the first sample's new segment.
+	mov	ax, fs:[si.ExtraLen]	; Fetch the length exceeding 64 kB.
+	mov	fs:[si.CurLen], ax	; Store the new sample length.
+	xor	bp, bp			; ES:BP --> Next block of sample.
+	mov	fs:[si.ExtraLen], bp	; Zero the ExtraLen variable.
+	clc				; Clear the CF; not ready.
+	ret				; Go mix some more bytes.
+
+HandleLoop	EndP
+;±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±
+;±±									      ±±
+;±±			   T H E   D A T A   A R E A			      ±±
+;±±									      ±±
+;±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±
+OldSbInt	Label	Dword
+OldIntOffs	DW	0
+OldIntSeg	DW	0
+
+TempCount	DW	0
+TempOffset	DW	0
+
+FreeBuffer	DW	0		; The number of the free buffer.
+NextToMix	DW	0		; The next buffer to fill.
+MixCount	DW	0		; The retrace mixing count.
+MixBufReloc	DW	0		; Mixing buffer relocation.
+MixBufOffs	DW	0		; Mix buffer's offset for the mixer.
+MixBufCount	DW	0		; Mixing count for the mixer.
+SlideCntr	DW	0		; The effect command counter.
+SlideCntrOrg	DW	0		; The backup storage variable.
+
+PlayingInfo	Label	Word
+PlayMode	DW	0
+CallFreq	DW	0
+PlayFreq	DW	0
+TempoMode	DW	0
+OctaveMode	DW	0
+
+DeviceInfo	Label	Word
+DeviceNum	DW	0
+BaseAddr	DW	0
+IRQ		DW	0
+DMA		DW	0
+FilterMode	DW	0
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InstrPtr	EQU	0     ; D	; Current sample offset.
+InstrSeg	EQU	4     ; W	; Current sample segment.
+CurAcc		EQU	12    ; D	; Current note's accumulator.
+CurLen		EQU	16    ; W	; Current sample's length.
+ExtraLen	EQU	18    ; W	; # of bytes exceeding 64k.
+CurVol		EQU	20    ; B	; Current sample's volume.
+Repeat		EQU	21    ; B	; Flag: 1 = looped instrument.
+RepeatFrom	EQU	22    ; W	; Instrument loop start point.
+RepeatTo	EQU	24    ; W	; Instrument loop end point.
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SBC_Driver	EndS
+
+		End

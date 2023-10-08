@@ -1,0 +1,488 @@
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º CALL:     1) DAC_Init     --> Initialize the General DAC driver.	       º
+;º	     2) DAC_GetSpl   --> Called after loading each sample.	       º
+;º	     3) DAC_Start    --> Start playing the module or sample(s).        º
+;º	     4) DAC_Mixer    --> Mix the number of bytes specified.	       º
+;º	     5) DAC_Remove   --> Uninitialize the General DAC driver.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DAC_Driver	Segment Para Private Use16 'CODE'
+		Assume	CS:DAC_Driver, DS:Nothing, ES:Nothing
+
+	.386
+
+	DB	1000 DUP (80h)
+
+	BPtr	EQU Byte Ptr
+	WPtr	EQU Word Ptr
+	DPtr	EQU Dword Ptr
+
+PUBLIC	DAC_Init, DAC_GetSpl, DAC_Start, DAC_Mixer, DAC_Remove
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º     ú	 ÛÛÛÛÛÜ ÛÛÛÛÛÛ ÛÛÛÛÛÛ	.    ÛÛ  ÛÛÛÛÛÛ ÛÛ ÛÛÛÛÛÛ  .	   ú   º
+;º	   ú   . ÜÜ  ÛÛ ÜÜ  ÛÛ ÜÜ  ú	   . ÜÜ  ÜÜ  ÛÛ ÜÜ   ÜÜ        .       º
+;º	ù	 ÛÛ  ÛÛ ÛÛÛÛÛÛ ÛÛ      .     ÛÛ  ÛÛ  ÛÛ ÛÛ   ÛÛ  ú	    .  º
+;º  ú	     ú	 ÛÛÜ ÛÛ ÛÛÜ ÛÛ ÛÛÜ	     ÛÛÜ ÛÛÜ ÛÛ ÛÛÜ  ÛÛÜ    ú	       º
+;º	  .	 ÛÛÛÛÛÛ ÛÛÛ ÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛ ÛÛÛ ÛÛ ÛÛÛ  ÛÛÛ	ù      º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the DAC_Init function:			       º
+;º									       º
+;º		DS = Segment of the  following info blocks;  usually the       º
+;º		     data or code segment of the frontend program.	       º
+;º									       º
+;º		SI = Pointer to the Device Info block.	Unneeded entries       º
+;º		     should be set to zero;  if some entry is set to -1,       º
+;º		     the value will be auto-detected by the SoundSystem.       º
+;º		     0 - Device number (1 = DAC in LPT1, 2 = DAC in LPT2).     º
+;º		     2 - Base Address for the device.			       º
+;º		     4 - IRQ line for the device.			       º
+;º		     6 - DMA channel for the device.			       º
+;º									       º
+;º		DI = Pointer to the Playing Info block;  format follows:       º
+;º		     0 - Playing Mode (0 = AutoPlay, 1 = CallPlay).	       º
+;º		     2 - Retrace Frequency in Hz (for CallPlay mode).	       º
+;º		     4 - Mixing Frequency in Hz (not needed for GUS).	       º
+;º		     6 - PT/NT Tempo Mode (0 = PT-mode, 1 = NT-mode).	       º
+;º		     8 - Octave Mode (0 = 3 octaves, 1 = 5 octaves).	       º
+;º		    10 - Module Type (-1 if not specified).		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DAC_Init	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs		; Save the segment regs.
+	mov	ax, ds			; AX = Seg addr of the info blocks.
+	mov	fs, ax			; Set FS to point the info blocks.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+
+GetPlayMode:
+	mov	ax, fs:[di]		; Fetch the playing mode.
+	mov	PlayMode, ax		; Save the playing mode word.
+
+GetCallFreq:
+	mov	ax, fs:[di+2]		; Get the effect command frequency.
+	mov	CallFreq, ax		; Store the command update frequency.
+
+GetPlayFreq:
+	mov	ax, fs:[di+4]		; Fetch the playing frequency.
+	mov	PlayFreq, ax		; Store the mixing frequency.
+
+GetBaseAddr:
+	xor	bx, bx			; Use BX for clearing the ES.
+	mov	es, bx			; Set ES = BIOS data area.
+	mov	bx, 408h		; Point the LPT1 port address.
+	cmp	WPtr fs:[si], 1 	; General DAC in LPT1?
+	jz	$+5			; Skip next instruction if yes.
+	add	bx, 2			; Point to the LPT2 port address.
+	mov	ax, es:[bx]		; Fetch the LPT's port address.
+	mov	BaseAddr, ax		; Store the Base Address.
+
+CalcTimerCntr:
+	mov	ax, PlayFreq		; Fetch the playing frequency.
+	shl	eax, 16 		; Shift it to the upper word.
+	xor	edx, edx		; Clear the upper doubleword.
+	mov	ebx, 18 SHL 16+65536/5	; Set the divisor (÷ 18.2 Hz).
+	div	ebx			; Divide to get BIOS time cntr.
+	mov	TimerCntr, ax		; Store the calculated counter.
+	mov	TimerCntrOrg, ax	; Store a backup copy of it.
+
+CalcSlideCntr:
+	xor	dx, dx			; Zero DX before division.
+	mov	ax, PlayFreq		; Playing Frequency in AX.
+	mov	bx, 50			; Tick frequency by default = 50Hz.
+	div	bx			; Now AX = Command Counter.
+	mov	SlideCntr, ax		; Save the resulting counter.
+	mov	SlideCntrOrg, ax	; Save a backup copy of it.
+
+CalcMixCount:
+	xor	dx, dx			; Clear the DX for division.
+	mov	ax, PlayFreq		; Fetch the playing frequency.
+	div	CallFreq		; Divide it by the retrace freq.
+	add	ax, 10			; Round up by 10 extra bytes.
+	and	ax, 0FFFCh		; Count is now dividable by four.
+	mov	MixCount, ax		; Save the retrace mixing count.
+	pop	fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	ret				; Return.
+
+DAC_Init	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º     ù   ÛÛÛÛÛÜ ÛÛÛÛÛÛ ÛÛÛÛÛÛ     ú  ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛ ÛÛÛÛÛÛ   ú   º
+;º  .	   ÜÜ  ÛÛ ÜÜ  ÛÛ ÜÜ ú	 ù     ÜÜ	ÜÜ . ÜÜ  ÛÛ ßß ÛÛ   ÜÜ	 .   ú º
+;º	   ÛÛ  ÛÛ ÛÛÛÛÛÛ ÛÛ	  .  ú ÛÛÛÛÛÛ	ÛÛ   ÛÛÛÛÛÛ ÛÛÛÛÛÛ  ÛÛ	       º
+;º	.  ÛÛÜ ÛÛ ÛÛÜ ÛÛ ÛÛÜ ú		  ÜÛÛ ú ÛÛÜ  ÛÛÜ ÛÛ ÛÛÜ ÛÛ  ÛÛÜ   ú    º
+;º  ú	   ÛÛÛÛÛÛ ÛÛÛ ÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ	ÛÛÛ  ÛÛÛ ÛÛ ÛÛÛ ÛÛ  ÛÛÛ    ú   º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the DAC_Start function:			       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DAC_Start	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds			; Save the segment regs.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+
+HookInt8:
+	xor	ax, ax			; Request enable an IRQ.
+	mov	cx, ax			; Set CX = IRQ0, timer.
+	call	IrqMasker		; Call the IRQ mask handler.
+	mov	ax, 3508h		; Request old int8 vector from DOS.
+	int	21h			; Get old int vector via DOS.
+	mov	Int8Offs, bx		; Store offset of the old IRQ handler.
+	mov	Int8Seg, es		; Store the old IRQ handler's segment.
+	lea	dx, CovoxIRQ		; Point DS:DX to the new IRQ handler.
+	mov	ah, 25h 		; Set the DOS function number in AH.
+	int	21h			; Set the new int vector via DOS.
+
+SetTimer:
+	cli				; Disable interrupts for a while.
+	movzx	ebx, PlayFreq		; Get the desired frequency in EBX.
+	mov	eax, 1193180		; Set the dividend, 1193180 Hz.
+	div	ebx			; Divide it by playing frequency.
+	out	40h, al 		; Send the counter low byte.
+	jmp	$+2			; Let the I/O bus settle.
+	mov	al, ah			; Fetch the counter high byte.
+	out	40h, al 		; Then send it to the timer.
+	sti				; Enable interrupts again.
+
+	pop	ds es			; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	ret				; Return.
+
+DAC_Start	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º .   ÛÛÛÛÛÜ ÛÛÛÛÛÛ ÛÛÛÛÛÛ  .	 ú ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ .   ú º
+;º     ÜÜ  ÛÛ ÜÜ  ÛÛ ÜÜ        ú   ÜÜ	  ÜÜ   ú   ÜÜ	ÜÜ     ÜÜ  ÛÛ ÜÜ   ú   º
+;º   ú ÛÛ  ÛÛ ÛÛÛÛÛÛ ÛÛ ù     ú    ÛÛ ÛÛÛ ÛÛÛÛ	 . ÛÛ	ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛ  ù    º
+;º  ù  ÛÛÜ ÛÛ ÛÛÜ ÛÛ ÛÛÜ	 ú ÛÛÜ ÛÛ ÛÛÜ	   ÛÛÜ	   ÜÛÛ ÛÛÜ .  ÛÛÜ   ú  º
+;º     ÛÛÛÛÛÛ ÛÛÛ ÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ   ÛÛÛ	ÛÛÛÛÛÛ ÛÛÛ    ÛÛÛÛÛÛ   º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the DAC_GetSpl function: 		       º
+;º									       º
+;º		EDX = Offset of the sample to handle.			       º
+;º		EAX = Length of the sample to handle.			       º
+;º									       º
+;º OUTPUT:	EDX = Offset where to load the next sample.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DAC_GetSpl	Proc	Far
+
+	add	edx, eax		; Sample Start + Sample Length.
+	test	edx, 0Fh		; Offset already paragraph-aligned?
+	jz	Aligned 		; No further action if it is.
+	add	edx, 10h		; Round up to next paragraph.
+	and	dl, 0F0h		; Clear the four lowmost bits.
+Aligned:
+	ret				; Go load the next one.
+
+DAC_GetSpl	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º .   ú   ÛÛÛÛÛÜ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ú  ú   ÛÛÛÛÛÛÛ ÛÛ  ÛÛ  ÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛ	ú    ù º
+;º    ù    ÜÜ  ÛÛ ÜÜ  ÛÛ ÜÜ .	    ù  ÜÜ Û ÛÛ ÜÜ  ÜÜ  ÛÛ ÜÜ   ú ßß ÛÛ	  .    º
+;º  ú	   ÛÛ  ÛÛ ÛÛÛÛÛÛ ÛÛ  ú	  ú    ÛÛ Û ÛÛ ÛÛ   ßÛÛÜ  ÛÛÛÛ	 ÛÛÛÛÛÛ     ú  º
+;º   .	ú  ÛÛÜ ÛÛ ÛÛÜ ÛÛ ÛÛÜ	       ÛÛÜ  ÛÛ ÛÛÜ ÛÛÜ ÛÛ ÛÛÜ	 ÛÛÜ ÛÛ  ú   ú º
+;º .	   ÛÛÛÛÛÛ ÛÛÛ ÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛ  ÛÛ ÛÛÛ ÛÛÛ ÛÛ ÛÛÛÛÛÛ ÛÛÛ ÛÛ    ú   º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the DAC_Mixer function:			       º
+;º									       º
+;º		FS = Segment where the volume table and the Channel Info       º
+;º		     blocks are located; usually SEG SoundSys. NOTE: The       º
+;º		     volume table *MUST*  be located at the beginning of       º
+;º		     the segment!					       º
+;º									       º
+;º		SI = Offset of the first  Channel Info block.  The block       º
+;º		     structure is defined in the main Sound System. Each       º
+;º		     entry of the table is referred to like fs:[si+equ],       º
+;º		     where 'equ' is an offset  from the beginning of the       º
+;º		     array. The needed equates are defined at the end of       º
+;º		     the device drivers.				       º
+;º									       º
+;º		BP = Length of a Channel Info block in bytes.		       º
+;º									       º
+;º OUTPUT:	CF = 1 if playing parameter updating is requested; in	       º
+;º		practice,  that  means	calling the PatternParser and	       º
+;º		the effect command handlers,  which  will  update the	       º
+;º		channel info blocks, and then calling DAC_Mixer again	       º
+;º		with the same FS, SI and BP values as before.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DAC_Mixer	Proc	Far
+
+	cld				; Clear the direction flag.
+	pushad				; Save all 32-bit registers.
+	push	es ds			; Save the segment registers.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	mov	es, ax			; Set ES to point it as well.
+	cmp	MixBufCount, 0		; Mixing not completed yet?
+	jnz	MixSomeMore		; Go mix some more if so.
+
+	mov	cx, NextToMix		; Fetch number of buffer to fill.
+	mov	ax, FreeBuffer		; Fetch the free buffer number.
+	cmp	ax, cx			; Referencing the same buffer?
+	jne	MixingDone		; No mixing if not ready yet.
+	imul	bx, cx, 500		; Point to either CS:0 or CS:500.
+	mov	cx, MixCount		; Fetch the mixing byte count.
+	mov	MixBufOffs, bx		; Save the current buffer offset.
+	mov	MixBufCount, cx 	; Save the number of bytes to mix.
+	mov	di, bx			; Copy the final offset to DI.
+	shr	cx, 2			; Make it number of dwords.
+	mov	eax, 80808080h		; Clear the buffer with 80h.
+	rep	stosd			; Flush the mixing buffer.
+
+MixSomeMore:
+	mov	ax, SlideCntr		; Get the SlideCounter in AX.
+	mov	bx, MixBufCount 	; And the mixing count in BX.
+	cmp	ax, bx			; Compare the first two counts.
+	jbe	$+3			; Skip if AX is the smaller one.
+	xchg	bx, ax			; Exchange the counts; now AX < BX.
+	mov	cx, ax			; CX = Number of bytes to mix.
+	mov	di, MixBufOffs		; Set the mixing offset in DI.
+
+	REPT	4			; Handle channels five to eight.
+	call	MixChannel		; Mix the current channel.
+	add	si, bp			; SI --> Next channel info block.
+	ENDM				; End of repeat block.
+
+	cmp	ModuleType, 3		; Is this an 8-channel module?
+	jne	NoMoreChannels		; No more channels to mix if not.
+
+	REPT	4			; Handle channels five to eight.
+	call	MixChannel		; Mix the current channel.
+	add	si, bp			; SI --> Next channel info block.
+	ENDM				; End of repeat block.
+
+NoMoreChannels:
+	add	MixBufOffs, cx		; Set the mixer's new starting offset.
+	sub	SlideCntr, cx		; Sub the byte count from SlideCounter.
+	sub	MixBufCount, cx 	; Desired # of bytes mixed already?
+	jnz	GoHandleCommands	; If not, then go handle commands.
+	xor	NextToMix, 1		; Switch active buffer & quit mixing.
+	cmp	SlideCntr, 0		; Time to handle commands as well?
+	jz	GoHandleCommands	; If so, get back to SoundSys.
+
+MixingDone:
+	pop	ds es			; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	clc				; Quit mixing: clear CF.
+	ret				; Then return.
+
+GoHandleCommands:
+	mov	ax, SlideCntrOrg	; Fetch the original slide counter.
+	mov	SlideCntr, ax		; Restore the current slide counter.
+	pop	ds es			; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	stc				; Go handle commands: set CF.
+	ret				; Let the Sound System handle cmds.
+
+DAC_Mixer	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º  ú ÛÛÛÛÛÜ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ú   .  ÛÛÛÛÛ  ÛÛÛÛÛÛ ÛÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛú ÛÛ ÛÛÛÛÛÛ ú º
+;º    ÜÜ  ÛÛ ÜÜ  ÛÛ ÜÜ ú     .	  ßß ÛÛ  ÜÜ   ú ÜÜ Û ÛÛ ÜÜ  ÛÛ ÜÜ  ÛÛ ÜÜ       º
+;º ú  ÛÛ  ÛÛ ÛÛÛÛÛÛ ÛÛ	ú      ú  ÛÛÛÛÛÛ ÛÛÛÛ	ÛÛ Û ÛÛ ÛÛ  ÛÛ ÛÛ  ÛÛ ÛÛÛÛ ú   º
+;º    ÛÛÜ ÛÛ ÛÛÜ ÛÛ ÛÛÜ    ú	  ÛÛÜ ÛÛ ÛÛÜ ú	ÛÛÜ  ÛÛ ÛÛÜ ÛÛ ÛÛÜ ÛÛ ÛÛÜ    ù º
+;º   úÛÛÛÛÛÛ ÛÛÛ ÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛÛ ÛÛÛ ÛÛ ÛÛÛÛÛÛ ÛÛÛ  ÛÛ ÛÛÛÛÛÛ ÛÛÛÛÛß ÛÛÛÛÛÛ   º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	No parameters required for the DAC_Remove procedure.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DAC_Remove	Proc	Far
+
+	cli				; Disable interrupts.
+	pushad				; Save all 32-bit regs.
+	push	ds			; Save the data segment.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	mov	al, 34h 		; Channel 0, Mode 2, binary.
+	out	43h, al 		; Port 43h, 8253 timer mode.
+	jmp	$+2			; Let the I/O bus settle.
+	xor	ax, ax			; Clear the accumulator.
+	out	40h, al 		; Set the counter low byte.
+	jmp	$+2			; Let the I/O bus settle.
+	mov	al, ah			; Fetch the counter high byte.
+	out	40h, al 		; Then send it to the timer.
+	mov	ax, 2508h		; Set AL = Timer's INT number.
+	lds	dx, OldInt8		; Point DS:DX to the old int vector.
+	int	21h			; Restore the original int handler.
+	pop	ds			; Restore the data segment.
+	popad				; Restore all 32-bit regs.
+	sti				; Enable interrupts again.
+	ret				; Return.
+
+DAC_Remove	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AX = The request: 0 = Enable IRQ, 1 = Disable IRQ.	       º
+;º		CX = The number of the IRQ to enable or disable.	       º
+;º FUNCTION:	This routine enables/disables IRQs.			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+IrqMasker	Proc	Near
+
+	cli				; Disable external interrupts.
+	or	ax, ax			; Which operation requested?
+	jz	EnableIrq		; Skip if enable requested.
+	shl	ax, cl			; Shift bit to correct position.
+	mov	ah, al			; Save the result.
+	in	al, 21h 		; Fetch the current IRQ mask.
+	or	al, ah			; Disable the requested IRQ.
+	out	21h, al 		; Send the new IRQ mask back.
+	sti				; Enable external interrupts.
+	ret				; Return.
+EnableIrq:
+	mov	ah, 1			; Set the basic IRQ mask in AH.
+	shl	ah, cl			; Shift bit to correct position.
+	not	ah			; Create the final IRQ mask.
+	in	al, 21h 		; Fetch the current IRQ mask.
+	and	al, ah			; Enable the requested IRQ.
+	out	21h, al 		; Send the new IRQ mask back.
+	sti				; Enable external interrupts.
+	ret				; Return.
+
+IrqMasker	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+MixChannel	Proc	Near
+
+	push	cx si di bp		; Save the regs needed by MixerParser.
+	les	ebp, fs:[si.InstrPtr]	; ES:BP -> Sample1, EBP.H = Accumulator
+	mov	edx, fs:[si.CurAcc]	; Fetch the accumulator for the sample.
+	mov	bh, fs:[si.CurVol]	; Fetch the current volume.
+	mov	ax, fs:[si.CurLen]	; Fetch the length of the sample.
+	cmp	bp, ax			; End-of-instrument reached yet?
+	jnb	ChannelDone		; Skip mixing if yes.
+
+MixByte:
+	add	ebp, edx		; 2 / Add the accumulator.
+	adc	bp, 0			; 2 / Handle the possible carry.
+	cmp	bp, ax			; 2 / End of instrument reached yet?
+	jnb	HandleLoop		; 3 / Go handle the loop if so.
+ContMix:
+	mov	bl, es:[bp]		; 4 / Fetch a byte from the sample.
+	mov	bl, fs:[bx]		; 4 / Scale it according to the volume.
+	add	[di], bl		; 2 / Mix the byte with other channels.
+	inc	di			; 2 / Point to the next byte in buffer.
+	dec	cx			; 2 / Decrement the loop counter.
+	jnz	MixByte 		; 9 / Go handle the next byte.
+	jmp	ChannelDone		; - / This channel done; return.
+
+;			ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ The end-of-instrument handler ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+HandleLoop:
+	cmp	WPtr fs:[si.ExtraLen],0 ; Is the length of sample over 64 kB?
+	jnz	LongInst		; Jump if sample is over 64 kB.
+	cmp	BPtr fs:[si.Repeat], 1	; Instrument looped?
+	je	ResetLoop		; Go reset the loop if it is.
+	mov	DPtr fs:[si.CurAcc], 0	; Zero out the accumulator.
+	mov	bp, fs:[si.CurLen]	; Fetch the InstrLen in BP.
+	jmp	ChannelDone		; No more bytes to mix.
+ResetLoop:
+	mov	bp, fs:[si.RepeatTo]	; Fetch the loop end offset.
+	mov	ax, bp
+	mov	fs:[si.CurLen], bp	; Set it to be end of the spl.
+	mov	bp, fs:[si.RepeatFrom]	; Fetch the loop start offset.
+	jmp	ContMix 		; Go mix the rest of the bytes.
+LongInst:
+	mov	ax, es			; Fetch the current sample segment.
+	add	ax, 1000h		; Point to the next 64 kB block.
+	mov	es, ax			; Set the new value as CurSplSeg.
+	mov	fs:[si.InstrSeg], ax	; Save the first sample's new segment.
+	mov	ax, fs:[si.ExtraLen]	; Fetch the length exceeding 64 kB.
+	mov	fs:[si.CurLen], ax	; Store the new sample length.
+	xor	bp, bp			; ES:BP --> Next block of sample.
+	mov	fs:[si.ExtraLen], bp	; Zero the ExtraLen variable.
+	jmp	ContMix 		; Go mix the rest of the bytes.
+
+ChannelDone:
+	mov	fs:[si.InstrPtr], ebp	; Save updated offset to the sample.
+	pop	bp di si cx		; Restore the regs needed by mixer.
+	ret				; Return to the mixer.
+
+MixChannel	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+CovoxIRQ	Proc	Far
+
+	push	ax			; Save the AX.
+	push	dx			; Save the DX.
+	dec	cs:TimerCntr		; Time to execute BIOS timer?
+	jz	BIOSTime		; Skip if it is.
+SrcPtr: mov	al, cs:[0001h]		; Point the byte to play.
+	dec	WPtr cs:[SrcPtr+2]	; Decrement the byte pointer.
+	dec	cs:PlayCount		; Decrement the byte counter.
+	jz	WrapPtr 		; Jump if time to flip buffers.
+	mov	dx, cs:BaseAddr 	; Fetch the port address.
+	out	dx, al			; Play the byte.
+	mov	al, 20h 		; Send the EOI signal..
+	out	20h, al 		; to the interrupt controller.
+	pop	dx			; Restore the DX.
+	pop	ax			; Restore the AX.
+	iret				; Return.
+
+WrapPtr:
+	mov	ax, cs:FreeBuffer	; Fetch the free buffer pointer.
+	imul	ax, 500 		; Point AX to either CS:0 or 500.
+	mov	WPtr cs:[SrcPtr+2], ax	; Reset the source buffer pointer.
+	mov	ax, cs:MixCount 	; Get number of bytes to play.
+	mov	cs:PlayCount, ax	; Store it for temporary use.
+	xor	cs:FreeBuffer, 1	; Flip the free buffer ptr.
+	mov	al, 20h 		; End-of-interrupt request.
+	out	20h, al 		; Send it to the PIC.
+	pop	dx			; Restore the DX.
+	pop	ax			; Restore the AX.
+	iret				; Return.
+
+BIOSTime:
+	pushf				; Save the flags.
+	mov	ax, cs:TimerCntrOrg	; Fetch the original counter.
+	mov	cs:TimerCntr, ax	; Restore the timer counter.
+	call	cs:OldInt8		; Execute the BIOS timer.
+	pop	dx			; Restore the DX.
+	pop	ax			; Restore the AX.
+	iret				; Interrupt return.
+
+CovoxIRQ	EndP
+;±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±
+;±±									      ±±
+;±±			   T H E   D A T A   A R E A			      ±±
+;±±									      ±±
+;±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±
+OldInt8 	Label	Dword
+Int8Offs	DW	0
+Int8Seg 	DW	0
+
+FreeBuffer	DW	0		; The number of the free buffer.
+NextToMix	DW	0		; The next buffer to fill.
+MixCount	DW	0		; The retrace mixing count.
+MixBufReloc	DW	0		; Mixing buffer relocation.
+MixBufOffs	DW	0		; Mix buffer's offset for the mixer.
+MixBufCount	DW	0		; Mixing count for the mixer.
+SlideCntr	DW	0		; The effect command counter.
+SlideCntrOrg	DW	0		; The backup storage variable.
+
+PlayCount	DW	1		; Byte count for Covox handler.
+TimerCntr	DW	0		; The BIOS timer counter.
+TimerCntrOrg	DW	0		; Storage for it's backup.
+
+PlayingInfo	Label	Word
+PlayMode	DW	0
+CallFreq	DW	50
+PlayFreq	DW	22000
+TempoMode	DW	0
+OctaveMode	DW	0
+ModuleType	DW	0
+
+DeviceInfo	Label	Word
+BaseAddr	DW	378h
+IRQ		DW	0
+DMA		DW	1
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InstrPtr	EQU	0     ; D	; Current sample offset.
+InstrSeg	EQU	4     ; W	; Current sample segment.
+CurAcc		EQU	12    ; D	; Current note's accumulator.
+CurLen		EQU	16    ; W	; Current sample's length.
+ExtraLen	EQU	18    ; W	; # of bytes exceeding 64k.
+CurVol		EQU	20    ; B	; Current sample's volume.
+Repeat		EQU	21    ; B	; Flag: 1 = looped instrument.
+RepeatFrom	EQU	22    ; W	; Instrument loop start point.
+RepeatTo	EQU	24    ; W	; Instrument loop end point.
+InstNum 	EQU	27    ; B	; Current instrument number.
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+DAC_Driver	EndS
+
+		End
+

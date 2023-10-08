@@ -1,0 +1,2158 @@
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º .	    ú			.      THE			    ù	       º
+;º		     .				      . 		       º
+;º  ßßßß ßßÛßÛ ßßßß   ßßÛßÛ ß  Û ßßßß ß ßßßß . ßßßß ß  Û ßßßß ßßßß ßßßß ßßÛßÛ  º
+;º  Ûßß  Û Û Û Ûßß    Û Û Û Û  Û ßßßÛ Û Û      ßßßÛ ßßÛß ßßßÛ . Û  Ûßß	Û Û Û  º
+;º  ßßßß ß ß ß ß   .  ß ß ß ßßßß ßßßß ß ßßßß   ßßßß   ß  ßßßß	ß  ßßßß ß ß ß  º
+;º .				   ù		    .			    ú  º
+;º	    CODED BY DEVASTATOR AND SARACEN OF THE ELECTROMOTIVE FORCE	ú      º
+;º     ú     SB PRO SUPPORT ADDED BY SAINT OF THE ELECTROMOTIVE FORCE	       º
+;º   .		   ú			     ù		   .		  ú    º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º CALL:	InitSound   --> Initialize the Sound System.		       º
+;º		StartPlay   --> Start playing the module.		       º
+;º		PlaySample  --> Play a sample on a free channel.	       º
+;º		CallPlay    --> Called every retrace when in call-mode.        º
+;º		QuitPlay    --> Uninitialize the Sound System.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+	EXTRN	DAC_Init, DAC_GetSpl, DAC_Start, DAC_Mixer,  DAC_Remove
+	EXTRN	SBC_Init, SBC_GetSpl, SBC_Start, SBC_Mixer,  SBC_Remove
+	EXTRN	GUS_Init, GUS_GetSpl, GUS_Start, GUS_Remove
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SoundSys	Segment Para Private Use16 'CODE'
+		Assume	CS:SoundSys, DS:SoundSys, ES:Nothing
+
+	.386
+
+	DB	65*256 DUP (0)
+
+	BPtr	EQU Byte Ptr
+	WPtr	EQU Word Ptr
+	DPtr	EQU Dword Ptr
+
+PUBLIC	InitSound, StartPlay, PlaySample, CallPlay, QuitPlay
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º ú	 ú   ÛÛ ÛÛÛÛÛÜ ÛÛ ÛÛÛÛÛÛß ÜÛÛÛÛ ÜÛÛÛÛÜ ÛÛú ÛÛ ÛÛÛÛÛÜ ÛÛÛÛÛÜ  ú	   ú . º
+;º   ù	     ÛÛ ÛÛ  ÛÛ ÛÛ ú ÛÛ	ú ÛÛ	ÛÛ  ÛÛ ÛÛ  ÛÛ ÛÛ  ÛÛ ÛÛ  ÛÛ	 ù     º
+;º    ú   .  ÛÛ ÛÛ  ÛÛ ÛÛ   ÛÛ	  ÛÛÛÛÛ ÛÛ úÛÛ ÛÛ .ÛÛ ÛÛ  ÛÛ ÛÛ  ÛÛ   ú     ù  º
+;º ù	.    ÛÛ ÛÛ úÛÛ ÛÛ   ÛÛ ú     ÛÛ ÛÛ  ÛÛ ÛÛ  ÛÛ ÛÛú ÛÛ ÛÛ  ÛÛ  .	ù      º
+;º   ú	   ù ÛÛ ÛÛ  ÛÛ ÛÛ   ÛÛ	  ÛÛÛÛÛ ßÛÛÛÛß ÛÛÛÛÛß ÛÛ  ÛÛ ÛÛÛÛÛß	 ù   ù º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the InitSound function:			       º
+;º									       º
+;º		ES = Module Segment; where the module is to be loaded.	       º
+;º									       º
+;º		BX = File handle for the module; DOS's file pointer must       º
+;º		     be set at the beginning of the module file.	       º
+;º									       º
+;º		DS = Segment of the  following info blocks;  usually the       º
+;º		     data or code segment of the frontend program.	       º
+;º									       º
+;º		SI = Pointer to the Device Info block.	Unneeded entries       º
+;º		     should be set to zero;  if some entry is set to -1,       º
+;º		     the value will be auto-detected by the SoundSystem.       º
+;º		     0 - Device number. 				       º
+;º			 0 - No Sound					       º
+;º			 1 - General DAC in LPT1			       º
+;º			 2 - General DAC in LPT2			       º
+;º			 3 - Sound Blaster				       º
+;º			 4 - Sound Blaster Pro				       º
+;º			 5 - Gravis Ultrasound				       º
+;º		     2 - Base Address for the device.			       º
+;º		     4 - IRQ line for the device.			       º
+;º		     6 - DMA channel for the device.			       º
+;º		     8 - SBPro filter mode (0 = no change, 1 = on, 2 = off).   º
+;º									       º
+;º		DI = Pointer to the Playing Info block;  format follows:       º
+;º		     0 - Playing Mode (0 = AutoPlay, 1 = CallPlay).	       º
+;º		     2 - Calling Frequency in Hz (for CallPlay mode).	       º
+;º		     4 - Mixing Frequency in Hz (not needed for GUS).	       º
+;º		     6 - PT/NT Tempo Mode (0 = PT-mode, 1 = NT-mode).	       º
+;º		     8 - Octave Mode (0 = 3 octaves, 1 = 5 octaves).	       º
+;º		    10 - Module Type (-1 if not specified).		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+InitSound	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs gs		; Save the segment regs.
+	movzx	eax, BPtr [si]		; Get the Device number in AL.
+	mov	cs:DeviceNumber, al	; Store the playing device number.
+	call	cs:DrvInit[eax*4]	; Initialize the correct device.
+	mov	ax, [di+4]		; Fetch the playing frequency.
+	mov	cs:PlayFreq, ax 	; Save the PlayFreq for later use.
+	mov	cs:ModuleSegment, es	; Save the module segment address.
+	call	LoadModule		; Load the module & detect it's type.
+	mov	dx, cs:NumChannels	; Fetch the number of channels.
+	cmp	cs:DeviceNumber, 4	; Are we playing with SB Pro?
+	jne	$+7			; Skip the next instruction if not.
+	shr	dx, 1			; Divide the channel number by two.
+	adc	dx, 0			; e.g. 5 Channels -> 3 for each side.
+	call	MakeVolTable		; Generate the volume table.
+
+CalcSlideCntr:
+	mov	bx, 50			; Tick frequency by default = 50Hz.
+	mov	ax, cs:PlayFreq 	; Playing Frequency in AX.
+	xor	dx, dx			; Zero DX before division.
+	div	bx			; Now AX = Command Counter.
+	mov	cs:SlideOrg, ax 	; Save the command counter.
+
+AllDone:
+	pop	gs fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	retf				; Return.
+
+DummyExit:
+	pop	ax			; Dummy pop; discard IP.
+	pop	ax			; Dummy POP; discard CS.
+	pop	gs fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	retf				; Return.
+
+InitSound	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º ú   . ÜÛÛÛÛ ÛÛÛÛÛÛß ÜÛÛÛÜ  ÜÛÛÛÛÜ ÛÛÛÛÛÛß ÜÛÛÛÛÜ ÜÛ .   ÜÛÛÛÜ  Ûİ  ŞÛ  ú    º
+;º	 ÛÛ    ú ÛÛ   ÛÛ   ÛÛ ÛÛ  ÛÛ   ÛÛ    ÛÛ  ÛÛ ÛÛ	  ÛÛú  ÛÛ ŞÛ  Ûİ    ú  º
+;º    ú  ÛÛÛÛÛ	 ÛÛ   ÛÛÜÜÜÛÛ ÛÛÛÛÛß ú ÛÛ    ÛÛÛÛÛß ÛÛ	  ÛÛÜÜÜÛÛ  ÛÛÛÛ  ù     º
+;º ù	.   ÛÛ	 ÛÛ ú ÛÛ   ÛÛ ÛÛ  Ûİ   ÛÛ  ù ÛÛ   . ÛÛ	ú ÛÛ   ÛÛ ú ÛÛ	    ú  º
+;º   ú	 ÛÛÛÛÛ	 ÛÛ   ÛÛ  úÛÛ ÛÛ  ŞÛ   ÛÛ    ÛÛ     ÛÛÛÛÜ ÛÛ   ÛÛ   ÛÛ ú  ù    º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	No parameters required for the StartPlay function.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+StartPlay	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs gs		; Save the segment regs.
+	movzx	eax, cs:DeviceNumber	; Fetch the playing device.
+	call	cs:DrvStart[eax*4]	; Start playing the module.
+	pop	gs fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	retf				; Return.
+
+StartPlay	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º   ÜÛÛÛÛÜ ÜÛ	   ÜÛÛÛÜ  Ûİú ŞÛ ÜÛÛÛÛ	ÜÛÛÛÜ  ÛÛÛÛÛÛÛÛÛÜ ÜÛÛÛÛÜ ÜÛ ú  ÜÛÛÛÛ   º
+;º ú ÛÛ  ÛÛ ÛÛ	ù ÛÛ   ÛÛ ŞÛ  Ûİ ÛÛ    ÛÛ   ÛÛ ÛÛ  ÛÛù ÛÛ ÛÛ  ÛÛ ÛÛ    ÛÛ   ú  º
+;º  úÛÛÛÛÛß ÛÛ ú  ÛÛÜÜÜÛÛ  ÛÛÛÛ .ÛÛÛÛÛ ÛÛÜÜÜÛÛ ÛÛ úÛÛ  ÛÛ ÛÛÛÛÛß ÛÛ  ú ÛÛÛÛ    º
+;º   ÛÛ   . ÛÛ	  ÛÛ   ÛÛ   ÛÛ	    ÛÛ ÛÛ ú ÛÛ ÛÛ  ÛÛ  ÛÛ ÛÛ   . ÛÛ    ÛÛ     .º
+;º   ÛÛ     ÛÛÛÛÜ ÛÛ ú ÛÛ ú ÛÛ ú ÛÛÛÛÛ ÛÛ   ÛÛ ÛÛ  ÛÛ  ÛÛ ÛÛ ù	 ÛÛÛÛÜ ÛÛÛÛÛ   º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	Parameters for the PlaySample function: 		       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+PlaySample	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs gs		; Save the segment regs.
+	movzx	eax, cs:DeviceNumber	; Fetch the playing device.
+	pop	gs fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	retf				; Return.
+
+PlaySample	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º  ú	  ù   ÜÛÛÛÛÛ  ÜÛÛÛÜ  ÜÛ ú  ÜÛ ú  ÜÛÛÛÛÜ ÜÛ ú   ÜÛÛÛÜ  Ûİ úŞÛ ú	   ù   º
+;º    ú     ú ÛÛ ú   ÛÛú  ÛÛ ÛÛ .  ÛÛ	 ÛÛ  ÛÛ ÛÛ    ÛÛ   ÛÛ ŞÛ  Ûİ   ù  ú    º
+;º ú	. ù   ÛÛ  ú  ÛÛÜÜÜÛÛ ÛÛ    ÛÛú	 ÛÛÛÛÛß ÛÛ  ú ÛÛÜÜÜÛÛ  ÛÛÛÛ  ú	.   ú  º
+;º   .	      ÛÛ     ÛÛ   ÛÛ ÛÛ  ú ÛÛ	úÛÛ  ú	ÛÛ    ÛÛ ú ÛÛ ú ÛÛ ú	  ù    º
+;º	ú  ú  ßÛÛÛÛÛ ÛÛ ú ÛÛ ÛÛÛÛÜ ÛÛÛÛÜ ÛÛ ú	ÛÛÛÛÜ ÛÛ   ÛÛ	ÛÛ   .	 ú   ú º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	No parameters required for the CallPlay function.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+CallPlay	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs gs		; Save the segment regs.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	mov	fs, ax			; Set FS to point it as well.
+MixMore:
+	movzx	eax, DeviceNumber	; Fetch the playing device.
+	lea	si, ChannelInfoBlock	; DS:SI = Ptr to channel info blocks.
+	mov	bp, ChnlInfoLen 	; BP = Length of each info block.
+	mov	dx, NumChannels 	; DX = Number of channels to mix.
+	mov	bx, SlideOrg		; BX = The command counter.
+	call	DrvUpdate[eax*4]	; Update the playing parameters.
+	jnc	MixingDone		; Not ready yet if CF is set.
+	call	HandleModule		; Call the command handlers.
+	jmp	MixMore 		; Then go mix some more bytes.
+MixingDone:
+	pop	gs fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	retf				; Return.
+
+CallPlay	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º   ú	 ù     ÜÛÛÛÛÜ ÛÛ  ÛÛ ÛÛ ÛÛÛÛÛÛß ÜÛÛÛÛÜ ÜÛ     ÜÛÛÛÜ  Ûİú ŞÛ  ú	   ù   º
+;º     ú     ú ÛÛ  ÛÛ ÛÛ úÛÛ ÛÛ ù ÛÛ   úÛÛ  ÛÛ ÛÛ .  ÛÛú  ÛÛ ŞÛ  Ûİ    ú     ú º
+;º  ù	 . ù   ÛÛ úÛÛ ÛÛ  ÛÛ ÛÛ   ÛÛ ù	ÛÛÛÛÛß ÛÛ  ú ÛÛÜÜÜÛÛ. ÛÛÛÛ  ú	 . ù   º
+;º    .        ÛÛ ÜÛÛ ÛÛ  ÛÛùÛÛ  ùÛÛ	ÛÛ ú   ÛÛ    ÛÛ  úÛÛ   ÛÛ     .        º
+;º ú	 ú  ú  ßÛÛÛÛÛ ÛÛÛÛÛß ÛÛ   ÛÛ  ú ÛÛ   ú ÛÛÛÛÜ ÛÛ   ÛÛ ú ÛÛ  ú	 ù  ú  º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º INPUT:	No parameters required for the QuitPlay function.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+QuitPlay	Proc	Far
+
+	pushad				; Save all 32-bit regs.
+	push	es ds fs gs		; Save the segment regs.
+	movzx	eax, cs:DeviceNumber	; Fetch the playing device.
+	call	cs:DrvRemove[eax*4]	; Remove the device driver.
+	pop	gs fs ds es		; Restore the segment regs.
+	popad				; Restore all 32-bit regs.
+	retf				; Return.
+
+QuitPlay	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	BX = File handle of the module to load. 		       º
+;º		ES = Segment where to load the module file.		       º
+;º FUNCTION:	Loads the whole module, detects it's type and passes	       º
+;º		the samples one-by-one to the selected device driver	       º
+;º		to handle them appropriately (e.g., load them high).	       º
+;º		File pointer must be set to the start of the module!	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+LoadModule	Proc	Near
+
+	push	ds			; Store data segment addr.
+	mov	bp, bx			; Backup file handle to BP.
+	mov	ax, es			; Fetch the ModuleSeg to AX.
+	mov	ds, ax			; Copy segment address to DS.
+	call	LoadHeader		; Load the module header part.
+	call	ConvertHeader		; Convert header to STM format.
+	mov	ax, es			; Get the ModuleSeg again to AX.
+	mov	ds, ax			; Copy the segment address to DS.
+	mov	dx, cs:PatternBase	; Where to load the song patterns.
+	movzx	si, cs:HighestUsed	; Fetch # of highest pattern used.
+	call	LoadPatterns		; Load the song itself into memory.
+	movzx	eax, cs:HighestUsed	; Get highest used pattern's number.
+	movzx	ebx, cs:PatternSize	; Copy size of one pattern into EBX.
+	movzx	edx, cs:PatternBase	; Fetch base offset of the patterns.
+	inc	eax			; Round up the # of patterns loaded.
+	imul	eax, ebx		; Get total length of all patterns.
+	add	edx, eax		; Get the unaligned sample offset.
+	mov	ax, es			; Get ModuleSeg once again to AX.
+	mov	ds, ax			; Set the segment address to DS.
+	call	LoadSamples		; Finally load the instruments.
+	mov	bx, bp			; Set DOS's file handle to BX.
+	mov	ax, 3E00h		; Tell DOS to close the file.
+	int	21h			; Finally close the modfile.
+	pop	ds			; Restore the data segment.
+	ret				; Return to the InitSound.
+
+LoadModule	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DS = Module segment.					       º
+;º		BP = File handle of the module to load. 		       º
+;º FUNCTION:	Loads the module header and detects the module type.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+LoadHeader	Proc	Near
+
+	mov	ax, 3F00h		; Request read a file via DOS.
+	mov	cx, 1084		; Set length of the MOD header.
+	xor	dx, dx			; Clear the offset; read to DS:0.
+	mov	bx, bp			; Set the file handle to BX.
+	int	21h			; Read the module header via DOS.
+	call	DetectModType		; Detect module type & set constants.
+	call	GetNumPatts		; Get song length & NumPatts.
+	mov	cs:HighestSaved, ah	; Store number of patterns saved.
+	mov	cs:HighestUsed, bh	; Store number of patterns used.
+	mov	cs:LastOrder, si	; Save offset of last order byte.
+	mov	ax, 4201h		; Request move DOS's file pointer.
+	xor	cx, cx			; Clear the offset's high word.
+	mov	dx, cx			; Clear the offset's low word.
+	mov	bx, bp			; Set the file handle to BX.
+	int	21h			; Get current file pointer.
+	mov	cx, dx			; High word of file ptr to CX.
+	mov	dx, ax			; Low word of file ptr to DX.
+	sub	dx, 1084		; Get back to previous position.
+	sbb	cx, 0			; Handle the possible carry.
+	mov	ax, 4200h		; Move to start of file + CX:DX.
+	int	21h			; Move file ptr to start of mod.
+	mov	ax, 3F00h		; Request read from file.
+	mov	cx, cs:PatternBase	; Get the header size to CX.
+	xor	dx, dx			; Read to start of ModuleSeg.
+	mov	bx, bp			; Get the file handle again.
+	int	21h			; Read the header into memory.
+	ret				; Return to the song loader.
+
+LoadHeader	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DS = Module segment.					       º
+;º		BP = File handle of the module to load. 		       º
+;º		SI = Highest pattern to load (counting from zero).	       º
+;º		DX = Initial pattern offset (where to load the patterns).      º
+;º FUNCTION:	Reads the patterns and skips the unneeded patterns.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+LoadPatterns	Proc	Near
+
+	mov	cx, cs:PatternSize	; Length of one pattern.
+	mov	ax, 3F00h		; Request read from file.
+	mov	bx, bp			; Fetch the file handle.
+	int	21h			; Read one pattern to DS:DX.
+	mov	ax, ds			; Fetch the DS value.
+	mov	bx, cs:PatternSize	; Fetch the length of pattern.
+	shr	bx, 4			; Get the length in paragraphs.
+	add	ax, bx			; Point to the next pattern.
+	mov	ds, ax			; Set the result into the DS.
+	dec	si			; All patterns read?
+	jns	LoadPatterns		; Loop until they are.
+	movzx	ax, cs:HighestSaved	; Fetch highest saved pattern.
+	sub	al, cs:HighestUsed	; Calculate # of dummy patterns.
+	imul	ax, cs:PatternSize	; Multiply by pattern size.
+	mov	dx, ax			; Set the byte count to DX.
+	xor	cx, cx			; Zero the upper word.
+	mov	bx, bp			; Fetch the file handle.
+	mov	ax, 4201h		; Request move file pointer.
+	int	21h			; Skip the dummy patterns.
+	ret				; Return to the song loader.
+
+LoadPatterns	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES = Module segment.					       º
+;º		BP = File handle of the module to load. 		       º
+;º		EDX = Initial sample offset (where to load the samples).       º
+;º FUNCTION:	Read the samples from the module file and pass them to the     º
+;º		sound device driver. DOS's file pointer must be set to the     º
+;º		start of the samples!					       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+LoadSamples	Proc	Near
+
+	push	ds			; Save current data segment.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	xor	eax, eax		; No sample to load at this point.
+	movzx	ebx, DeviceNumber	; Fetch the playing device number.
+	call	DrvGetSpl[ebx*4]	; Get initial sample offset to EDX.
+	lea	si, InstrTable		; Point the STM instrument header.
+	mov	cx, InstrCount		; Get # of instruments to load.
+LoadSample:
+	push	cx			; Save the loop counter.
+	push	edx			; Save the sample pointer.
+	shr	edx, 4			; Convert the EDX to paragraphs.
+	mov	cs:[si+14], dx		; Store the sample base segment.
+	mov	cx, es			; Copy the module segment to CX.
+	add	cx, dx			; Add the sample pointer to CX.
+	mov	ds, cx			; Set DS to point the result.
+	xor	dx, dx			; Load the sample to DS:0.
+	mov	cx, cs:[si+16]		; Get sample length in bytes.
+	cmp	cs:ModuleType, 0	; Is this an STM module?
+	jne	NoRoundUp		; No SampleLen round-up if not.
+	test	cx, 0Fh 		; Sample Length MOD 16 == 0?
+	jz	NoRoundUp		; If so, no need to round up.
+	add	cx, 10h 		; Round up to next paragraph.
+	and	cx, 0FFF0h		; Clear the four lowmost bits.
+NoRoundUp:
+	mov	ax, 3F00h		; Request read from a file.
+	mov	bx, bp			; Get the module's file handle.
+	int	21h			; Read the sample into memory.
+	mov	cx, cs:[si+4]		; Number of remaining bytes.
+	jcxz	SplToDriver		; Skip if no extra bytes.
+	mov	ax, ds			; Get current DS value.
+	add	ax, 1000h		; Point to next 64k memory block.
+	mov	ds, ax			; Copy the new SegAddr to DS.
+	mov	ax, 3F00h		; Request read from a file.
+	int	21h			; Read remaining sample bytes.
+SplToDriver:
+	pop	edx			; Offset of current sample.
+	movzx	eax, WPtr cs:[si+16]	; Get the sample length to EAX.
+	movzx	ebx, WPtr cs:[si+4]	; Get number of bytes above 64k.
+	add	eax, ebx		; EAX = Real length of the sample.
+	movzx	ebx, cs:DeviceNumber	; Fetch the playing device number.
+	call	cs:DrvGetSpl[ebx*4]	; Pass the sample to the driver.
+	add	si, 32			; Point the next sample header.
+	pop	cx			; Get number of samples left.
+	loop	LoadSample		; Loop until samples loaded.
+	pop	ds			; Restore the data segment.
+	ret				; Return to the loader.
+
+LoadSamples	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES = Module Segment.					       º
+;º FUNCTION:	Detects the module type and sets some variables.	       º
+;º		Module's header must be loaded into the ModuleSeg.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+DetectModType	Proc	Near
+
+	push	ds			; Save current data segment.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	mov	PatternSize, 1024	; DEFAULT=Pattern is 1 kB long.
+	mov	PatternBase, 1084	; DEFAULT=Patterns begin from 1084.
+	mov	SongLenOffs, 3B6h	; DEFAULT=Song length located in 3B6h.
+	mov	BaseOrder, 3B8h 	; DEFAULT=Order list begins from 3B8h.
+	mov	NextOrder, 3B8h 	; DEFAULT=Fetch first order from 3B8h.
+	mov	PatBaseSeg, 43h 	; DEFAULT=Pattern base segment is 43h.
+	mov	PatBaseOffs, 0Ch	; DEFAULT=Relative patt offset is 0Ch.
+	mov	NumChannels, 4		; DEFAULT=Number of channels is four. 
+	mov	InstrCount, 31		; DEFAULT=Number of samples is 31.
+	mov	SongSpeed, 6		; DEFAULT=Song speed is 6.
+	mov	di, 1080		; DI = Offset of MOD signature.
+	cmp	DPtr es:[di], '.K.M'	; Is the M.K. sign there?
+	je	ItsMOD			; Jump to normal MOD init if so.
+	cmp	DPtr es:[di], '!K!M'	; Is this a PT2.2 100-patt MOD?
+	je	ItsMOD			; Jump to normal MOD init if so.
+	cmp	DPtr es:[di], '4TLF'	; Is the FLT4 sign there?
+	je	ItsMOD			; Jump to normal MOD init if so.
+        cmp     DPtr es:[di], 'NHC8'    ; Is the CHN6 sign there?
+	je	ItsMOD6 		; Jump to 6-chan. init if yes.
+	cmp	DPtr es:[di], '8TLF'	; Is the FLT8 sign there?
+	je	ItsMOD8 		; Jump to 8-chan. init if yes.
+	cmp	DPtr es:[di], 'ATCO'	; Is the OCTA sign there?
+	je	ItsMOD8 		; If so, it's OctaComposer MOD.
+	cmp	DPtr es:[di], 'NHC8'	; Is the 8CHN sign there?
+	je	ItsMOD8 		; If so, it's FastTracker MOD.
+	cmp	WPtr es:[28], 021Ah	; Is this an STM module?
+	jne	ItsOldMOD		; If not, it must be old ST MOD.
+ItsSTM:
+	mov	ModuleType, 0		; ModuleType=0: STM.
+	mov	PatternBase, 490h	; Set the pattern base offset.
+	mov	PatBaseSeg, 49h 	; Set the pattern base segment.
+	mov	PatBaseOffs, 0		; Offset relative to PatBaseSeg.
+	mov	BaseOrder, 410h 	; Address of first order byte.
+	mov	NextOrder, 410h 	; Next order byte to fetch.
+	mov	al, es:[20h]		; Fetch tempo byte from STM header.
+	shr	al, 4			; Simply discard the lower nibble.
+	mov	SongSpeed, al		; Then store the song speed.
+	pop	ds			; Restore the data segment.
+	ret				; Return to song loader.
+ItsMOD8:
+	mov	ModuleType, 3		; ModuleType=3: 8-channel MOD.
+	mov	NumChannels, 8		; Number of channels is eight.
+	mov	PatternSize, 2048	; Size of an 8-channel pattern.
+	pop	ds			; Restore the data segment.
+	ret				; Return to song loader.
+ItsMOD6:
+	mov	ModuleType, 4		; ModuleType=4: 6-channel MOD.
+	mov	NumChannels, 6		; Number of channels is six.
+	mov	PatternSize, 1536	; Size of a 6-channel pattern.
+	pop	ds			; Restore the data segment.
+	ret				; Return to song loader.
+ItsOldMOD:
+	mov	ModuleType, 2		; ModuleType=2: old ST MOD.
+	mov	PatternBase, 600	; Set the pattern base offset.
+	mov	SongLenOffs, 1D6h	; Address of song length byte.
+	mov	BaseOrder, 1D8h 	; Address of first order byte.
+	mov	NextOrder, 1D8h 	; Next order byte to fetch.
+	mov	PatBaseSeg, 25h 	; Set the pattern base segment.
+	mov	PatBaseOffs, 08h	; Offset relative to PatBaseSeg.
+	mov	InstrCount, 15		; Number of instruments = 15.
+	pop	ds			; Restore the data segment.
+	ret				; Return to song loader.
+ItsMOD:
+	mov	ModuleType, 1		; DEFAULT=Module is PT/NT MOD.
+	pop	ds			; Restore the data segment.
+	ret				; Return to song loader.
+
+DetectModType	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º RETURNS:	AH = Number of patterns saved.				       º
+;º		BH = Highest pattern used in the song.			       º
+;º		SI = Offset of the last song order byte.		       º
+;º FUNCTION:	Scan the  pattern order list and get number of patterns saved  º
+;º		and highest pattern actually used. These should be equal, but  º
+;º		in case they're not, the unused patterns can be skipped while  º
+;º		loading the module.					       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GetNumPatts	Proc	Near
+
+	xor	ax, ax			; Clear the AX.
+	mov	si, cs:BaseOrder	; Load start of order list.
+	cmp	cs:ModuleType, 0	; Is this an STM module?
+	je	GetNumPattSTM		; Jump to STM code if so.
+	mov	di, cs:SongLenOffs	; Where to find the song length.
+	mov	cl, es:[di]		; Fetch the song length to CL.
+	and	cx, 00FFh		; Clear CH and test if CL zero.
+	jnz	$+5			; Skip if song length normal.
+	mov	cx, 7Fh 		; Otherwise set maximum count.
+	call	FindHighest		; Some recursive code here...
+	mov	si, cs:BaseOrder	; SI = Start of the order list.
+	mov	bh, ah			; BH = highest order number.
+	xor	ah, ah			; Clear the AH for another pass.
+	mov	cx, 7Fh 		; Scan the order list again.
+FindHighest:
+	mov	al, es:[si]		; Fetch next byte from order list.
+	cmp	al, ah			; Is it above the previous one?
+	jbe	$+4			; Save the previous one if not.
+	mov	ah, al			; Else replace the old one with it.
+	inc	si			; Increment the order pointer.
+	loop	FindHighest		; Loop through the order list.
+	mov	cl, es:[di]		; Get the number of positions.
+	add	cx, cs:BaseOrder	; Add order list start offset.
+	mov	si, cx			; Copy the resulting value to CX.
+	dec	si			; Point SI to the last order byte.
+	ret				; Return w/ highest PattNum in AH.
+
+GetNumPattSTM:
+	mov	al, es:[si]		; Fetch next byte from order list.
+	cmp	al, ah			; Is it above the previous one?
+	jbe	$+4			; Save the previous one if not.
+	mov	ah, al			; Else replace the old one with it.
+	inc	si			; Increment the order pointer.
+	cmp	BPtr es:[si], 99	; End of order list reached?
+	jne	GetNumPattSTM		; Continue scanning if not.
+	mov	bh, ah			; Patterns saved = patterns used.
+	dec	si			; Point SI to the last order byte.
+	ret				; Return w/ highest PattNum in AH.
+
+GetNumPatts	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES = Module segment.					       º
+;º FUNCTION:	Converts a standard MOD header into "extended" STM format,     º
+;º		except for the segment addresses of the instruments, which     º
+;º		are to be set later, in the LoadSamples procedure, as they     º
+;º		are subject to change at that point (paragraph align aso).     º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ConvertHeader	Proc	Near
+
+	cmp	cs:ModuleType, 0	; Is this an STM module?
+	jne	$+3			; Skip if we're handling a MOD.
+	ret				; No need to convert if STM file.
+	push	bp			; Save the module file handle.
+	push	ds			; Save current data segment.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	mov	si, 20			; Point MOD instrument table.
+	lea	di, InstrTable		; DI = Pointer to new STM header.
+	mov	cx, InstrCount		; CX = Number of instruments.
+InstrLoop:
+	movzx	eax, WPtr es:[si+22]	; Fetch sample length.
+	xor	ebp, ebp		; Set the extra length to 0.
+	xchg	ah, al			; Exchange LSB and MSB.
+	add	ax, ax			; Multiply by two.
+	jnc	Below64k		; Skip if below 64kB.
+	mov	bp, ax			; Extra length = length - 65535.
+	inc	bp			; Add the missed byte.
+	mov	ax, 0FFFFh		; Length = 65535.
+Below64k:
+	mov	[di+16], ax		; Store the sample length.
+	mov	[di+4], bp		; Store the extra length.
+	mov	al, es:[si+25]		; Fetch sample volume.
+	mov	[di+22], al		; Store the volume.
+	mov	ax, es:[si+26]		; Fetch loop begin addr.
+	xchg	ah, al			; Exchange LSB and MSB.
+	add	ax, ax			; Multiply by two.
+	cmp	ax, [di+16]		; Compare it with sample length.
+	jnb	NoRep			; No loop at all if not valid.
+	mov	[di+18], ax		; Store the loop begin.
+	mov	bx, es:[si+28]		; Fetch loop length.
+	cmp	bx, 100h		; Is it 100h?
+	je	NoRep			; Jump if yes.
+	or	bx, bx			; Is the loop length zero?
+	jz	NoRep			; Skip if yes.
+	xchg	bh, bl			; Exchange LSB and MSB.
+	add	bx, bx			; Multiply by two.
+	add	bx, ax			; Add the loop begin.
+	cmp	bx, [di+16]		; Check if invalid end offset.
+	jbe	NoRep+3 		; Skip if valid end offset.
+	mov	bx, [di+16]		; Set Loop End = InstrLen.
+	jmp	$+5			; Skip the next instruction.
+NoRep:	mov	bx, 0FFFFh		; LoopEnd = 65535.
+	mov	[di+20], bx		; Store the Loop End.
+	mov	al, es:[si+24]		; Get the finetune.
+	and	al, 0Fh 		; Extract the lower nibble.
+	mov	[di+24], al		; Store the finetune.
+	add	si, 30			; Increment source index.
+	add	di, 32			; Increment destination index.
+	loop	InstrLoop		; Loop until header converted.
+	pop	ds			; Restore the data segment.
+	pop	bp			; Restore the file handle.
+	ret				; Header converted: return.
+
+ConvertHeader	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DL = Number of samples to mix in one (eg. 8, 4, 2, aso).       º
+;º		DH = 0: Generate an 8-bit volume table. 		       º
+;º		DH = 1: Generate a 16-bit volume table. 		       º
+;º FUNCTION:	Generates the volume table.				       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MakeVolTable	Proc	Near
+
+	push	es			; Save the ES.
+	mov	ax, cs			; Get the current code segment.
+	mov	es, ax			; Copy it to ES.
+	xor	di, di			; ES:DI --> VolumeTable.
+	mov	al, 64			; Set the maximum volume to AL.
+	imul	dl			; AX = SamplesToMix * MaxVolume.
+	mov	cx, ax			; Copy the final divisor to CX.
+	xor	bp, bp			; Zero the table counter.
+TableLoop:
+	xor	bl, bl			; Zero the byte counter.
+	mov	si, 256 		; Make 256 entries for each array.
+ByteLoop:
+	movsx	ax, bl			; Copy the byte counter to AX.
+	imul	bp			; DX:AX = SampleByte * CurVol.
+	idiv	cx			; Calculate the final volume byte.
+	stosb				; Store the value into the table.
+	inc	bl			; Increment the byte counter.
+	dec	si			; Decrement the inner loop counter.
+	jnz	ByteLoop		; Loop until one array generated.
+	inc	bp			; Increment the table counter.
+	cmp	bp, 65			; All 64 tables generated yet?
+	jb	TableLoop		; Loop until all tables done.
+	pop	es			; Restore the ES.
+	ret				; Return.
+
+MakeVolTable	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+DrvInit 	Label	Dword
+DW	Offset DummyExit, Seg SoundSys
+DW	Offset	DAC_Init, Seg DAC_Init
+DW	Offset	DAC_Init, Seg DAC_Init
+DW	Offset	SBC_Init, Seg SBC_Init
+DW	Offset	SBC_Init, Seg SBC_Init
+DW	Offset	GUS_Init, Seg GUS_Init
+
+DrvGetSpl	Label	Dword
+DW	Offset	DummyExit, Seg SoundSys
+DW	Offset DAC_GetSpl, Seg DAC_GetSpl
+DW	Offset DAC_GetSpl, Seg DAC_GetSpl
+DW	Offset SBC_GetSpl, Seg SBC_GetSpl
+DW	Offset SBC_GetSpl, Seg SBC_GetSpl
+DW	Offset GUS_GetSpl, Seg GUS_GetSpl
+
+DrvStart	Label	Dword
+DW	Offset DummyExit, Seg SoundSys
+DW	Offset DAC_Start, Seg DAC_Start
+DW	Offset DAC_Start, Seg DAC_Start
+DW	Offset SBC_Start, Seg SBC_Start
+DW	Offset SBC_Start, Seg SBC_Start
+DW	Offset GUS_Start, Seg GUS_Start
+
+DrvUpdate	Label	Dword
+DW	Offset	DummyExit, Seg SoundSys
+DW	Offset	DAC_Mixer, Seg DAC_Mixer
+DW	Offset	DAC_Mixer, Seg DAC_Mixer
+DW	Offset	SBC_Mixer, Seg SBC_Mixer
+DW	Offset	SBC_Mixer, Seg SBC_Mixer
+DW	Offset	DummyExit, Seg SoundSys
+
+DrvRemove	Label	Dword
+DW	Offset	DummyExit, Seg SoundSys
+DW	Offset DAC_Remove, Seg DAC_Remove
+DW	Offset DAC_Remove, Seg DAC_Remove
+DW	Offset SBC_Remove, Seg SBC_Remove
+DW	Offset SBC_Remove, Seg SBC_Remove
+DW	Offset GUS_Remove, Seg GUS_Remove
+
+DeviceNumber	DB	0
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	None							       º
+;º OUTPUT:	None							       º
+;º FUNCTION:	Handles the  effect commands and pattern parsing;  must be     º
+;º		called normally 50 times per second (GUS) or while mixing.     º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+HandleModule	Proc	Near
+
+	push	ds			; Save the Data Segment.
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	inc	TickCounter		; Increment the current tick counter.
+	mov	ax, TickCounter 	; Fetch the tick counter in AL.
+	cmp	al, SongSpeed		; Does it match the current speed?
+	jb	NoNewNotes		; Just do the F/X if not yet.
+	mov	TickCounter, 0		; Zero out the current tick counter.
+	dec	PattDelayCnt		; Decrement the pattern delay count.
+	jnz	NoNewNotes		; Do not fetch notes if count not zero.
+	mov	PattDelayCnt, 1 	; Ensure that delay count doesn't wrap.
+	call	ParsePattern		; Otherwise parse new pattern row.
+	jmp	ExitCmdHandler		; Do not handle commands this time.
+
+NoNewNotes:
+	lea	bp, ChannelInfoBlock	; BP --> Channel command info block.
+	mov	cx, NumChannels 	; Fetch the number of channels.
+HandleNext:
+	push	cx			; Save the loop counter.
+        mov     bx, ds:[bp.CmdNumber]   ; BX = command number * 2
+	call	ModCmdHandlers[bx]	; Call command handler routine.
+	add	bp, ChnlInfoLen 	; Point to next channel info block.
+	pop	cx			; Get the loop counter from stack.
+	loop	HandleNext		; Go handle the next channel.
+
+ExitCmdHandler:
+	pop	ds			; Restore the Data Segment.
+	ret				; Return to the caller.
+
+HandleModule	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º		     T H E   P A T T E R N   P A R S E R		       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ParsePattern	Proc	Near
+
+	mov	ax, cs			; AX = Current code segment.
+	mov	ds, ax			; Set DS to point this segment.
+	mov	es, ModuleSegment	; Set ES = Module Segment.
+	dec	PatternRow		; Decrement the rows-to-go counter.
+	jnz	GotOrder		; Skip orderfetch if nonzero.
+	call	OrderFetch		; Fetch next order.
+GotOrder:
+	mov	es, RowSegment		; Set the ES to point pattern.
+	mov	OrigRowSeg, es		; Store it for patternloop.
+	inc	RowSegment		; Point to the next row.
+	movzx	ebp, PatBaseOffs	; Fetch offset. ES:EBP = pattern row.
+	lea	si, ChannelInfoBlock	; SI --> Channel info blocks.
+	mov	cx, NumChannels 	; Fetch the number of channels.
+ParseNext:
+	push	cx			; Save the loop counter.
+	call	ParseChannel		; Parse the current channel.
+	add	bp, 4			; Point to the next channel.
+	add	si, ChnlInfoLen 	; Next channel info block.
+	pop	cx			; Restore the loop counter.
+	loop	ParseNext		; Fetch info from all channels.
+
+	cmp	ModuleType, 3		; Is this an 8-channel module?
+	jne	ExitParser		; Exit the parser now if not.
+	inc	RowSegment		; Each row is 32 bytes = 2 paragraphs.
+
+ExitParser:
+	ret				; Return.
+
+ParsePattern	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to the row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º RETURNS:	Nothing.						       º
+;º FUNCTION:	Parse one channel row.					       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ParseChannel	Proc	Near
+
+	call	GetInstrument		; Fetch instrument info.
+	js	NoNote			; Don't play anything if invalid instr.
+	jc	NoInstrument		; Jump if no instrument found.
+	mov	[si.TrueVol], dl	; Set the instrument volume.
+	mov	[si.InstrVol], dl	; Save instrument volume in any case.
+	mov	[si.FineTune], dh	; Store the finetune value.
+NoInstrument:
+	lea	di, NoNote		; Return address if Tone Portamento.
+	call	ParseCommands		; Parse the possible commands.
+	call	GetAccumulator		; Fetch acc. for sample mixing.
+	jc	NoNote			; Jump if no note found.
+	mov	[si.CurPeriod], bx	; Save the current note period.
+	cmp	WPtr [si.CmdNumber], 32 ; NoteDelay active?
+	je	NoNote			; Don't play the note if yes.
+	mov	[si.CurAcc], eax	; Store accumulator for the note.
+	movzx	eax, SampleOffset	; Fetch the sample offset to set.
+	mov	[si.InstrPtr], eax	; Set the sample pointer to SampleOffs.
+
+        call    PlayInstrument          ; Play the note.
+	setc	[si.Repeat]		; Repeat = 1 if looped instr.
+	mov	[si.RepeatTo], di	; Set the loop end offset.
+	mov	[si.RepeatFrom], cx	; Set the loop start offset.
+	mov	[si.CurLen], ebx	; Store the sample's length in bytes.
+	mov	[si.InstrSeg], ax	; Store the sample's segment address.
+	cmp	ReParseCommand, 1	; Fineslide on current row?
+	jne	NoNote			; Skip command parsing if not.
+	call	ParseCommands		; Execute the fineslide.
+NoNote:
+	call	GetVolume		; Fetch the volume.
+	jc	NoVolume		; No volume found if carry set.
+	mov	[si.TrueVol], al	; Set the volume.
+NoVolume:
+	push	bp			; Save the pattern pointer.
+	mov	bp, si			; Copy the Info Block pointer in BP.
+	mov	al, [si.TrueVol]	; Fetch the true volume.
+	call	MakeCurVol		; Set the final volume in the mixer.
+	pop	bp			; Restore the pattern pointer.
+	ret				; Return to the main pattern parser.
+
+ParseChannel	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º RETURNS:	EAX = New accumulator (EAX.H = Dec part, AX = Int part).       º
+;º		BX = New note's frequency in periods.			       º
+;º		CF = 1 if no note found.				       º
+;º FUNCTION:	Get the accumulator value for current note for sample mixing.  º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GetAccumulator	Proc	Near
+
+	cmp	ModuleType, 0		; Is this an STM?
+	jne	ModGetAcc		; Skip STM code if not.
+	xor	ax, ax			; Zero AX.
+	mov	cx, ax			; Zero CX.
+	mov	al, es:[bp]		; Fetch the note & octave byte.
+	or	al, al			; Test for a note.
+	js	NoNoteFound		; Don't parse if no note found.
+	mov	cl, es:[bp+1]		; Fetch the instrument byte.
+	shr	cl, 3			; Extract the instrument number.
+	jnz	YesInst 		; Skip if new instrument found.
+	mov	cl, [si.InstrNum]	; Else use old instrument number.
+	inc	cx			; Increment the instrument number.
+YesInst:
+	dec	cx			; Decrement the instrument number.
+	imul	cx, 120 		; Multiply the CX by 120.
+	mov	bx, ax			; Duplicate the AX in the BX.
+	shr	bx, 4			; Set the octave's number in BX.
+	and	ax, 0Fh 		; Set the note's number in AX.
+	add	ax, ax			; Then multiply the AX by 2.
+	imul	bx, 24			; Multiply the BX by 24.
+	add	bx, ax			; Create the pointer.
+	add	bx, cx			; Adjust the BX.
+	mov	ax, PeriodTable[bx]	; AX = period value of the note.
+	mov	bx, ax			; Copy the period to BX.
+	push	bx			; Save the BX.
+	call	PeriodToAcc		; Calculate the accumulator value.
+	pop	bx			; Restore the BX.
+	clc				; Clear the carry flag.
+	ret				; Return to the pattern parser.
+NoNoteFound:
+	stc				; Set the carry; no note was found.
+	ret				; Return to the pattern parser.
+
+ModGetAcc:
+	mov	ah, es:[bp]		; Fetch a byte from the current row.
+	and	ah, 0Fh 		; Extract the lo nibble.
+	mov	al, es:[bp+1]		; Fetch the LSB.
+	or	ax, ax			; Set flags.
+	jz	NoNoteFound		; Jump if no note found.
+
+	cmp	ax, MinPeriod		; Is it beyond the table range?
+	jb	NoChange		; Skip the table lookup if yes.
+	cmp	ax, MaxPeriod		; Is it beyond the table range?
+	ja	NoChange		; Skip the table lookup if yes.
+
+	lea	bx, PeriodTable 	; Point the note period table.
+	mov	cx, NoteNum		; Set the number of notes to scan.
+	call	PeriodScan		; Search for the period in AX.
+	movzx	cx, [si.FineTune]	; Fetch the finetune value.
+	imul	cx, NoteNum		; Calculate relative offset.
+	add	cx, cx			; Convert it into a word offset.
+	add	bx, cx			; Add it to the original offset.
+	mov	ax, [bx]		; Fetch the new period value.
+	or	ax, ax			; Check the period value.
+	jz	NoNoteFound		; Jump if it's zero.
+
+NoChange:
+	mov	bx, ax			; Copy the period to BX.
+	push	bx			; Save the BX.
+	call	PeriodToAcc		; Calculate the accumulator value.
+	pop	bx			; Restore the BX.
+	clc				; Clear the carry flag.
+	ret				; Return to the pattern parser.
+
+GetAccumulator	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º RETURNS:	EAX = New accumulator (EAX.H = Dec part, AX = Int part).       º
+;º		BX = New note's frequency in periods.			       º
+;º		CF = 1 if no note found.				       º
+;º FUNCTION:	Get the accumulator value for current note for sample mixing.  º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GetDestPeriod	Proc	Near
+
+	cmp	ModuleType, 0		; Is this an STM?
+	jne	ModGetDest		; Skip STM code if not.
+	xor	ax, ax			; Zero AX.
+	mov	cx, ax			; Zero CX.
+	mov	al, es:[bp]		; Fetch the note & octave byte.
+	or	al, al			; Test for a note.
+	js	NoDestFound		; Don't parse if no note found.
+	mov	cl, es:[bp+1]		; Fetch the instrument byte.
+	shr	cl, 3			; Extract the instrument number.
+	jnz	YesInstD		; Skip if new instrument found.
+	mov	cl, [si.InstrNum]	; Else use old instrument number.
+	inc	cx			; Increment the instrument number.
+YesInstD:
+	dec	cx			; Decrement the instrument number.
+	imul	cx, 120 		; Multiply the CX by 120.
+	mov	bx, ax			; Duplicate the AX in the BX.
+	shr	bx, 4			; Set the octave's number in BX.
+	and	ax, 0Fh 		; Set the note's number in AX.
+	add	ax, ax			; Then multiply the AX by 2.
+	imul	bx, 24			; Multiply the BX by 24.
+	add	bx, ax			; Create the pointer.
+	add	bx, cx			; Adjust the BX.
+	mov	ax, PeriodTable[bx]	; AX = period value of the note.
+	mov	bx, ax			; Copy the period to BX.
+	push	bx			; Save the BX.
+	call	PeriodToAcc		; Calculate the accumulator value.
+	pop	bx			; Restore the BX.
+	clc				; Clear the carry flag.
+	ret				; Return to the pattern parser.
+NoDestFound:
+	stc				; Set the carry; no note was found.
+	ret				; Return to the pattern parser.
+
+ModGetDest:
+	mov	ah, es:[bp]		; Fetch a byte from the current row.
+	and	ah, 0Fh 		; Extract the lo nibble.
+	mov	al, es:[bp+1]		; Fetch the LSB.
+	or	ax, ax			; Set flags.
+	jz	NoDestFound		; Jump if no note found.
+
+	cmp	ax, MinPeriod		; Is it beyond the table range?
+	jb	DestNoChange		; Skip the table lookup if yes.
+	cmp	ax, MaxPeriod		; Is it beyond the table range?
+	ja	DestNoChange		; Skip the table lookup if yes.
+
+	movzx	bx, [si.FineTune]	; Fetch the finetune in BX.
+	imul	bx, NoteNum		; Calculate relative offset.
+	add	bx, bx			; Convert it into a word offset.
+	add	bx, Offset PeriodTable	; Final offset of the period table.
+	mov	cx, NoteNum		; Fetch the number of notes.
+	call	PeriodScan		; Search for the period in AX.
+
+	mov	al, [si.FineTune]	; Fetch the finetune.
+	test	al, 8			; Negative finetune?
+	jz	StpGossD		; Skip if not.
+	cmp	cx, NoteNum		; Is the note C-1?
+	je	StpGossD		; Skip if yes.
+	sub	bx, 2			; Use the previous note.
+StpGossD:
+	mov	ax, [bx]		; Fetch the new period value.
+	or	ax, ax			; Check the period value.
+	jz	NoDestFound		; Jump if it's zero.
+
+DestNoChange:
+	mov	bx, ax			; Copy the period to BX.
+	push	bx			; Save the BX.
+	call	PeriodToAcc		; Calculate the accumulator value.
+	pop	bx			; Restore the BX.
+	clc				; Clear the carry flag.
+	ret				; Return to the pattern parser.
+
+GetDestPeriod	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to the row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º RETURNS:	DL = Instrument Volume		CF = 1 if no instrument found  º
+;º		DH = Finetune Value		SF = 1 if invalid instrument   º
+;º FUNCTION:	Fetch instrument information.				       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GetInstrument	Proc	Near
+
+	push	es			; Store ES.
+	xor	ax, ax			; Clear AX.
+	cmp	ModuleType, al		; Is this an STM?
+	jne	ModGetInstr		; Skip STM code if not.
+	mov	al, es:[bp+1]		; Fetch a byte from the current row.
+	shr	al, 3			; Extract the instrument's # in AL.
+	mov	bx, 62			; BX = Offset of instr. headers.
+	mov	es, ModuleSegment	; Fetch segment of the module.
+	or	ax, ax			; Check if instrument number is zero.
+	jz	InstrNotFound		; Normal exit; no instrument found.
+	cmp	ax, 32			; Check that instr. number is legal.
+	jbe	InstrFound		; Jump if instrument # is valid.
+
+InvalidInstr:
+	xor	ax, ax			; Zero AX for setting the Sign Flag.
+	dec	ax			; AX = -1; Sign Flag is now set.
+	pop	es			; Then restore ES before exiting.
+	stc				; Set the Carry flag, too.
+	ret				; Return with SF=1 and CF=1.
+
+InstrNotFound:
+	xor	ax, ax			; Clear the Sign Flag.
+	pop	es			; Restore the ES.
+	stc				; Set the carry flag.
+	ret				; Then return with SF=0 and CF=1.
+
+ModGetInstr:
+	mov	al, es:[bp]		; Fetch a byte from current row.
+	and	al, 0F0h		; Extract the hi nibble.
+	mov	bl, es:[bp+2]		; Fetch another byte.
+	shr	bl, 4			; Extract the hi nibble to lo nibble.
+	or	al, bl			; Now AL = instr. number.
+	mov	bx, cs			; BX = the code segment.
+	mov	es, bx			; Set it to the ES.
+	lea	bx, InstrTable+14	; BX = Offset of instr. table.
+	or	ax, ax			; Check if instrument number is zero.
+	jz	InstrNotFound		; Normal exit; no instrument found.
+	cmp	ax, 32			; Check that instr. number is legal.
+	ja	InvalidInstr		; Jump if instrument # is invalid.
+InstrFound:
+	push	si			; Save the info block pointer.
+	dec	ax			; Adjust the instrument number a bit.
+	mov	[si.InstrNum], al	; Save the instrument number.
+	mov	si, ax			; Copy the instrument number to SI.
+	shl	si, 5			; Multiply by 32.
+	add	si, bx			; Now ES:SI --> Instrument info.
+	mov	dl, es:[si+8]		; Fetch instrument volume.
+	xor	dh, dh			; Use finetune 0.
+	cmp	ModuleType, 0		; Is this a STM?
+	je	NoFTune 		; Skip if yes.
+	mov	dh, es:[si+10]		; Get the finetune.
+NoFTune:
+	xor	ax, ax			; Clear the Sign Flag.
+	pop	si			; Restore the info block pointer.
+	pop	es			; Restore ES.
+	clc				; Instrument found; clear the carry.
+	ret				; Return with SF=0 and CF=0.
+
+GetInstrument	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	DS:SI = Pointer to current channel's Command Info Block.       º
+;º RETURNS:	CF = 1 if looped instrument   BX = Instrument Length	       º
+;º		AX = Instrument Seg Address   DI = Loop End Offset	       º
+;º		CX = Loop Start Offset	      EBX.H = # of bytes exceeding 64k º
+;º FUNCTION:	Fetch instrument information.				       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+PlayInstrument	Proc	Near
+
+	push	si			; Save the info block pointer.
+	push	es			; Store ES.
+	mov	ax, cs			; AX = the code segment.
+	mov	es, ax			; Set it to the ES.
+	lea	ebx, InstrTable+14	; Clear EBX.H & fetch table address.
+	cmp	ModuleType, 0		; Is this an STM?
+	jne	PlayInstr		; Skip STM code if not.
+	mov	es, ModuleSegment	; Fetch segment of the module.
+	mov	bx, 62			; BX = Offset of instr. headers.
+PlayInstr:
+	movzx	si, [si.InstrNum]	; Fetch the instrument number.
+	shl	si, 5			; Multiply by 32.
+	add	si, bx			; Now ES:SI --> Instrument info.
+	mov	ax, ModuleSegment	; Fetch segment address of module.
+	add	ax, es:[si]		; Add segment address of instrument.
+	mov	bx, es:[si+2]		; Fetch length of the instrument.
+	cmp	ModuleType, 0		; Is this an STM?
+	je	NoExtraLen		; Skip MOD code if it is.
+	rol	ebx, 16 		; Out of registers; have to use EBX.H.
+	mov	bx, es:[si-10]		; The length exceeding 64k boundary.
+	rol	ebx, 16 		; Out of 16-bit regs; have to use EBX.
+NoExtraLen:
+	mov	cx, es:[si+4]		; Fetch "Loop Start"
+	mov	di, es:[si+6]		; Fetch "Loop End"
+	clc				; Default = Instrument not looped.
+	inc	di			; Test if Loop End = 0FFFFh.
+	je	NoInstrLoop		; Jump if Loop End = 0FFFFh.
+	dec	di			; Test if Loop End = 0.
+	je	NoInstrLoop		; Jump if Loop End = 0.
+	stc				; Set Carry; instrument is looped.
+NoInstrLoop:
+	pop	es			; Restore ES.
+	pop	si			; Restore the info block pointer.
+	ret				; Return to the ParseChannel procedure.
+
+PlayInstrument	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º RETURNS:	AL = Volume for current note.				       º
+;º		CF = 1 if no volume specified.				       º
+;º FUNCTION:	Fetch the volume for current note.			       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+GetVolume	Proc	Near
+
+	mov	ax, es:[bp+1]		; Fetch byte #1 in AL & byte #2 in AH.
+	and	al, 7			; Clear unneeded bits of Byte1.
+	shr	ah, 1			; Discard the lowmost bit of Byte2.
+	add	al, ah			; Calculate the new volume.
+	cmp	al, 64			; Is it in range [0..64]?
+	ja	NoVolThisTime		; Invalid volume if not; return.
+	cmp	ModuleType, 0		; Is this an STM or MOD file?
+	jne	NoVolThisTime		; Go set the carry flag if MOD.
+	clc				; Clear the carry flag.
+	ret				; Return to the pattern parser.
+NoVolThisTime:
+	stc				; Error; set the carry flag.
+	ret				; Return to the pattern parser.
+
+GetVolume	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º RETURNS:	RowSegment = Segment of next pattern to play.		       º
+;º FUNCTION:	Point RowSegment to the pattern specified by the order-list.   º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+OrderFetch	Proc	Near
+
+	mov	PatternRow, 64		; Reset the rows-to-go counter.
+	mov	al, 65			; AL = the default loop point.
+	lea	si, ChannelInfoBlock
+	add	si, LoopPatRow
+	mov	[si+ChnlInfoLen*0], al
+	mov	[si+ChnlInfoLen*1], al
+	mov	[si+ChnlInfoLen*2], al
+	mov	[si+ChnlInfoLen*3], al
+	mov	[si+ChnlInfoLen*4], al
+	mov	[si+ChnlInfoLen*5], al
+	mov	[si+ChnlInfoLen*6], al
+	mov	[si+ChnlInfoLen*7], al
+	mov	bx, NextOrder		; Point the next order byte.
+	cmp	bx, LastOrder		; Time to wrap the song?
+	ja	LoopInSong		; Start over if so.
+	mov	al, es:[bx]		; Fetch next order byte.
+	inc	bx			; Update the order list ptr.
+	jmp	NoLoopInSong		; Skip the song loop handler.
+LoopInSong:
+	mov	bx, BaseOrder		; Else wrap the pattern pointer.
+	mov	al, es:[bx]		; And fetch the first pattern number.
+	inc	bx			; Increment the pointer.
+NoLoopInSong:
+	mov	NextOrder, bx		; Save the updated order list ptr.
+	xor	ah, ah			; Clear the upper 8 bits of the AX.
+	mov	cl, 6			; Set the default shift count in CL.
+	cmp	ModuleType, 3		; 8-channel ProTracker module?
+	jne	$+4			; Skip the next instruction if not.
+	inc	cl			; Increment the shift count.
+	shl	ax, cl			; Multiply AX by pattern size.
+	add	ax, ModuleSegment	; Add the module's segment.
+	add	ax, PatBaseSeg		; And the relative pattern base seg.
+	mov	RowSegment, ax		; Store the new pattern row's segment.
+	lea	si, ChannelInfoBlock
+	add	si, LoopRowSeg
+	mov	[si+ChnlInfoLen*0], ax
+	mov	[si+ChnlInfoLen*1], ax
+	mov	[si+ChnlInfoLen*2], ax
+	mov	[si+ChnlInfoLen*3], ax
+	mov	[si+ChnlInfoLen*4], ax
+	mov	[si+ChnlInfoLen*5], ax
+	mov	[si+ChnlInfoLen*6], ax
+	mov	[si+ChnlInfoLen*7], ax
+	ret				; Return to the Pattern Parser.
+
+OrderFetch	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AX = Period value to search from the PeriodTable.	       º
+;º		BX = Address of the period table to search through.	       º
+;º		CX = Number of entries to search (number of notes).	       º
+;º RETURNS:	BX = Pointer to the correct note in the period table.	       º
+;º FUNCTION:	Searches the PeriodTable for a given period value.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+PeriodScan	Proc	Near
+
+	cmp	ax, [bx]		; Compare the next value.
+	jae	NoteFound		; Jump if the right value is found.
+	add	bx, 2			; Increment the index.
+	loop	PeriodScan		; Loop until correct note found.
+	sub	bx, 2			; Otherwise use the last possible note.
+NoteFound:
+	ret				; Return to the caller.
+
+PeriodScan	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AX = Note frequency in periods. 			       º
+;º RETURNS:	EAX = Accumulator value in 16.16 format.		       º
+;º FUNCTION:	Calculates accumulator value from the period value.	       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+PeriodToAcc	Proc	Near
+
+	movzx	ebx, ax 		; Copy the period value to EBX.
+	mov	eax, 3546891		; Mid-C Period*Hertz value (428*8287).
+	xor	edx, edx		; Clear the EDX.
+	div	ebx			; Result: EAX = Note freq. in Hz.
+	mov	dx, ax			; Copy the integer part to DX.
+	xor	ax, ax			; Clear the decimal part.
+	mov	bx, PlayFreq		; Fetch the playing frequency.
+	shl	ebx, 16 		; Shift the integer part up.
+	shl	eax, 16 		; Shift the decimal part up.
+	movzx	edx, dx 		; Clear upper half of EDX.
+	div	ebx			; Divide EDX:EAX by EBX.
+	rol	eax, 16 		; Swap the resulting words.
+	ret				; Return to the caller.
+
+PeriodToAcc	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	AL = New volume (0-64). 				       º
+;º		DS:BP = Pointer to current channel's Command Info Block.       º
+;º FUNCTION:	Stores the current volume for the mixer.		       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MakeCurVol	Proc	Near
+
+	sub	al, MasterVolume	; Substract the master volume.
+	jnc	$+4			; Skip if positive.
+	xor	al, al			; Clear the AL.
+        mov     ds:[bp.CurVol], al      ; Store the final volume to use.
+	ret
+
+MakeCurVol	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º FUNCTION:	Parse the possible commands.				       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ParseCommands	Proc	Near
+
+	xor	ax, ax			; Zero the AX for clearing variables.
+	mov	SampleOffset, ax	; Assume no new sample offset.
+	mov	ReParseCommand, al	; Execute command normally.
+	mov	bl, es:[bp+2]		; Fetch the command byte in BL.
+	and	bx, 0Fh 		; Extract the command number.
+	add	bx, bx			; Make it a word index to the table.
+	cmp	ModuleType, al		; Is this an STM (ModuleType=0)?
+	jne	ModParseCmd		; Skip STM code if not.
+	mov	[si.CmdNumber], ax	; Assume no command.
+	call	StmCmdParsers[bx]	; Call correct command initializer.
+	ret				; Return.
+ModParseCmd:
+	mov	WPtr [si.CmdNumber], 16 ; Assume no command.
+	call	ModCmdParsers[bx]	; Call correct command initializer.
+	ret				; Return.
+
+ParseCommands	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º FUNCTION:	Parse the possible commands.				       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ParsePTCommands Proc	Near
+
+	mov	bl, es:[bp+3]		; Fetch the command info byte in BL.
+	and	bx, 00F0h		; Extract the E-command's number.
+	shr	bx, 3			; Make it a word index to the table.
+	call	PT_Parsers[bx]		; Call correct E-command initializer.
+	ret				; Return.
+
+ParsePTCommands EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º		O N E - P A S S   C O M M A N D   H A N D L E R S	       º
+;º									       º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º Information about all one-pass command handlers in general:		       º
+;º									       º
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º FUNCTION:	Init the possible multiple-pass commands for each channel.     º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SetTempo	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the song speed in AL.
+	or	al, al			; Is it a "Stop Song" request?
+	jz	Dummy			; No new speed for song if yes.
+	cmp	ModuleType, 0		; Is this a Scream Tracker module?
+	jne	NotSTMspeed		; Skip if this is a MOD.
+	shr	al, 4			; Divide the STM speed by 16.
+	mov	SongSpeed, al		; Then store it for later use.
+	ret				; And return to the pattern parser.
+
+NotSTMspeed:				; The module file is not an STM.
+	cmp	al, 20h 		; Is it a normal pattern tick counter?
+	ja	AbnormalTempo		; If not, handle the tempo differently.
+	mov	SongSpeed, al		; Otherwise save the speed of the song.
+	mov	TickCounter, 0		; Zero out the tick counter.
+	ret				; Return to the pattern parser.
+
+AbnormalTempo:				; Song Speed ò 20h --> abnormal tempo.
+	cmp	ModuleType, 1		; Could this be a ProTracker module?
+	je	TempoBPM		; Handle BPM tempos if it might be.
+	cmp	ModuleType, 3		; Is this an 6/8-channel FT module?
+	jae	TempoBPM		; If so, this must be a BPM tempo.
+	cmp	ModuleType, 2		; Is this a 15-instrument MOD file?
+	je	Dummy			; Then the speed is invalid; quit.
+	shr	al, 4			; Otherwise discard the low nibble.
+	jmp	NotSTMspeed		; And go handle the speed normally.
+
+TempoBPM:				; Calculate the new command counter.
+	cmp	TempoMode, 1		; Are the PT tempo settings disabled?
+	je	Dummy			; If so, do not set new song speed.
+	movzx	ebx, al 		; Copy the BPM value to EBX.
+	movzx	eax, PlayFreq		; Fetch the playing frequency in EAX.
+	imul	ebx, 6*4		; EBX = # of CmdCounter ticks / minute.
+	imul	eax, 60 		; EAX = # of bytes played per minute.
+	xor	edx, edx		; Zero the upper doubleword.
+	div	ebx			; EAX = The final command counter.
+	mov	SlideOrg, ax		; Store the command counter.
+	ret				; Return to the pattern parser.
+
+SetTempo	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetVolume	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	cmp	al, 40h 		; Is the value beyond range?
+	jbe	$+4			; Skip next instruction if not.
+	mov	al, 40h 		; Set the max. volume.
+	mov	[si.TrueVol], al	; Set the volume.
+	ret				; Return.
+
+SetVolume	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+PositionJump	Proc	Near
+
+	xor	bx, bx			; Zero BX.
+	mov	bl, es:[bp+3]		; Fetch the info byte.
+	add	bx, BaseOrder		; Add the base address.
+	mov	NextOrder, bx		; Set the new order byte.
+	mov	PatternRow, 1		; Fetch next order on next pass.
+	ret				; Return.
+
+PositionJump	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+BreakPattern	Proc	Near
+
+	mov	PatternRow, 1		; Fetch next order on next pass.
+	ret				; Return to command parser.
+
+BreakPattern	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetSampleOffs	Proc	Near
+
+	xor	eax, eax		; Ensure that upper half of EAX = 0.
+	mov	al, es:[bp+3]		; Fetch (SampleOffset / 256) in AL.
+	shl	ax, 8			; Offset from which to start playing.
+	mov	[si.InstrPtr], eax	; Set the sample pointer to SampleOffs.
+	mov	SampleOffset, ax	; Store the SampleOffset for later use.
+	ret				; Return.
+
+SetSampleOffs	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FineSlideUp	Proc	Near
+
+	push	si			; Save the command info block pointer.
+	push	bp			; Save the pattern pointer.
+	mov	al, es:[bp+3]		; Fetch the command info byte in AL.
+	and	al, 0Fh 		; Extract the real command info.
+	mov	[si.CmdInfo], al	; Set the Command Info byte.
+	mov	bp, si			; Copy the pointer to the BP.
+	call	PortamentoUp		; Call the Portamento Up routine.
+	pop	bp			; Restore the pattern pointer.
+	pop	si			; Restore the cmd info block pointer.
+	mov	ReParseCommand, 1	; Slide again if note changed.
+	ret				; Return to the PT-command parser.
+
+FineSlideUp	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FineSlideDown	Proc	Near
+
+	push	si			; Save the command info block pointer.
+	push	bp			; Save the pattern pointer.
+	mov	al, es:[bp+3]		; Fetch the command info byte in AL.
+	and	al, 0Fh 		; Extract the real command info.
+	mov	[si.CmdInfo], al	; Set the Command Info byte.
+	mov	bp, si			; Copy the pointer to the BP.
+	call	PortamentoDown		; Call the Portamento Down routine.
+	pop	bp			; Restore the pattern pointer.
+	pop	si			; Restore the cmd info block pointer.
+	mov	ReParseCommand, 1	; Slide again if note changed.
+	ret				; Return to the PT-command parser.
+
+FineSlideDown	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+PatternLoop	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	ax, 0Fh 		; Extract the real command info.
+	jz	SetLoop 		; Set loop if command info = 0.
+	cmp	BPtr [si.LoopCount], 0	; Test if loop already set.
+	je	SetCount		; Set the loop count if not.
+	dec	BPtr [si.LoopCount]	; Decrement the loop counter.
+	jnz	JmpLoop 		; Loop if zero not reached yet.
+	ret				; Return to the PT-command parser.
+
+SetCount:
+	mov	[si.LoopCount], al	; Set the loop counter.
+
+JmpLoop:
+	mov	al, [si.LoopPatRow]	; Fetch the loop pattern row.
+	mov	PatternRow, ax		; Set the pattern row.
+	mov	ax, [si.LoopRowSeg]	; Fetch the loop row segment.
+	cmp	ModuleType, 3		; Is this an 8-channel module?
+	jne	NormSeg 		; Skip if not.
+	dec	ax			; Decrement - ParsePattern will inc it!
+NormSeg:
+	mov	RowSegment, ax		; Set the row segment.
+	ret				; Return to the PT-command parser.
+
+SetLoop:
+	mov	ax, PatternRow		; Fetch the pattern row.
+	inc	ax			; Back to the current row.
+	mov	[si.LoopPatRow], al	; Set the loop pattern row.
+	mov	ax, OrigRowSeg		; Fetch the row segment.
+	mov	[si.LoopRowSeg], ax	; Set the loop row segment.
+	ret				; Return to the PT-command parser.
+
+PatternLoop	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetGlissControl Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the real command info.
+	and	BPtr [si.GlisFunk], 0F0h; Zero the gliss control nibble.
+	or	[si.GlisFunk], al	; Set the new glissando control nibble.
+	ret				; Return to the PT-command parser.
+
+SetGlissControl EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetVibControl	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the real command info.
+	and	BPtr [si.WaveCtrl], 0F0h; Zero the vibrato control nibble.
+	or	[si.WaveCtrl], al	; Set the new vibrato control nibble.
+	ret				; Return to the PT-command parser.
+
+SetVibControl	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetFineTune	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the real command info.
+	mov	[si.FineTune], al	; Set the new finetune value.
+	ret				; Return to the PT-command parser.
+
+SetFineTune	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SetTreControl	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	shl	al, 4			; Rotate the command to hi nibble.
+	and	BPtr [si.WaveCtrl], 0Fh ; Zero the tremolo control nibble.
+	or	[si.WaveCtrl], al	; Set the new tremolo control nibble.
+	ret				; Return to the PT-command parser.
+
+SetTreControl	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FineVolSldUp	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the amount to slide up.
+	mov	bl, al			; Move the Slide Count to BL.
+	mov	al, [si.TrueVol]	; Fetch current volume.
+	add	al, bl			; Slide it up.
+	cmp	al, 64			; Maximum volume reached yet?
+	jbe	$+4			; Volume = 64 if AL > 64.
+	mov	al, 64			; Set the volume to 40h (maximum).
+	mov	[si.TrueVol], al	; Store the new volume.
+	ret				; Return to the PT-command parser.
+
+FineVolSldUp	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+FineVolSldDown	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the amount to slide down.
+	mov	bl, al			; Move the Slide Count to BL.
+	mov	al, [si.TrueVol]	; Fetch current volume.
+	sub	al, bl			; Slide it down.
+	jnb	$+4			; Volume = 0 if AL < 0.
+	xor	al, al			; Zero volume.
+	mov	[si.TrueVol], al	; Store the new volume.
+	ret				; Return to the PT-command parser.
+
+FineVolSldDown	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+PatternDelay	Proc	Near
+
+	mov	al, es:[bp+3]		; Fetch the Command Info byte.
+	and	al, 0Fh 		; Extract the amount to delay.
+	inc	al			; Round up the delay count.
+	add	PattDelayCnt, al	; Store the delay count.
+	ret				; Return to the PT-command parser.
+
+PatternDelay	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Dummy		Proc	Near
+
+	ret				; Dummy procedure; return to caller.
+
+Dummy		EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º     M U L T I P L E - P A S S   C O M M A N D   I N I T I A L I Z E R S     º
+;º									       º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º Information about all command initializers in general:		       º
+;º									       º
+;º INPUT:	ES:BP = Pointer to row & channel to parse.		       º
+;º		DS:SI = Pointer to current channel's Command Info Block.       º
+;º		DI = Return address (for TonePortamento initializer only).     º
+;º FUNCTION:	Init the possible multiple-pass commands for each channel.     º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SlideCommands	Proc	Near
+
+	xor	ax, ax			; Zero AX.
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	mov	[si.CmdInfo], ax	; Save the command info byte.
+	mov	[si.CmdNumber], bx	; Store the command number.
+	ret				; Return to the command initializer.
+
+SlideCommands	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitTonePort	Proc	Near
+
+	xor	ax, ax			; Zero AX.
+	or	al, es:[bp+3]		; Fetch the info byte and test if zero.
+	jz	InitTone&VSlide 	; Continue with old parameters if AL=0.
+	mov	[si.PortInfo], ax	; Save the portamento info byte.
+InitTone&VSlide:
+	xor	ax, ax			; Zero AX.
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	mov	[si.CmdInfo], ax	; Save the command info byte for T&S.
+	mov	[si.CmdNumber], bx	; Store the command number.
+	call	GetDestPeriod		; Get the destination note.
+	jc	NoNewDestPeriod 	; Skip if no new DestPeriod defined.
+	mov	[si.DestPeriod], bx	; Store the destination note's period.
+	mov	ax, [si.CurPeriod]	; Fetch the current note.
+	cmp	ax, bx			; Portamento Up or Portamento Down?
+	seta	[si.TPortaDirec]	; Set the flag.
+NoNewDestPeriod:
+	pop	eax			; Discard two previous RET addresses.
+	jmp	di			; Jump to the original return address.
+
+InitTonePort	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitVibrato	Proc	Near
+
+	mov	[si.CmdNumber], bx	; Store the command number.
+	xor	dx, dx			; Zero the DX for testing info byte.
+	or	dh, es:[bp+3]		; Fetch the info byte and test if zero.
+	jz	Dummy			; Continue with old parameters if DH=0.
+	mov	ax, [si.VibratoInfo]	; Fetch the vibrato info byte in AX.
+	mov	dl, dh			; Copy the info byte to DL.
+	and	dl, 0Fh 		; Test lo nibble.
+	jz	VibSkip 		; Continue with old parameter if zero.
+	and	al, 0F0h		; Zero the lo nibble.
+	or	al, dl			; Copy the info byte lo nibble.
+VibSkip:
+	mov	dl, dh			; Copy the info byte to DL.
+	and	dl, 0F0h		; Test hi nibble
+	jz	VibSkip2		; Continue with old parameter if zero.
+	and	al, 0Fh 		; Zero the hi nibble.
+	or	al, dl			; Copy the info byte hi nibble.
+VibSkip2:
+	mov	[si.VibratoInfo], ax	; Save the vibrato info byte.
+	ret				; Return to the command initializer.
+
+InitVibrato	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitTremolo	Proc	Near
+
+	mov	[si.CmdNumber], bx	; Store the command number.
+	xor	dx, dx			; Zero the DX for testing info byte.
+	or	dh, es:[bp+3]		; Fetch the info byte and test if zero.
+	jz	Dummy			; Continue with old parameters if DH=0.
+	mov	ax, [si.TremoloInfo]	; Fetch the tremolo info byte in AX.
+	mov	dl, dh			; Copy the info byte to DL.
+	and	dl, 0Fh 		; Test lo nibble.
+	jz	TreSkip 		; Continue with old parameter if zero.
+	and	al, 0F0h		; Zero the lo nibble.
+	or	al, dl			; Copy the info byte lo nibble.
+TreSkip:
+	mov	dl, dh			; Copy the info byte to DL.
+	and	dl, 0F0h		; Test hi nibble
+	jz	TreSkip2		; Continue with old parameter if zero.
+	and	al, 0Fh 		; Zero the hi nibble.
+	or	al, dl			; Copy the info byte hi nibble.
+TreSkip2:
+	mov	[si.TremoloInfo], ax	; Save the tremolo info byte.
+	ret				; Return to the command initializer.
+
+InitTremolo	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitRetrigNote	Proc	Near
+
+	xor	ax, ax			; Zero AX.
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	mov	[si.CmdInfo], ax	; Save the command info byte.
+	mov	WPtr [si.CmdNumber], 28 ; Store the command number (0Eh*2).
+	ret				; Return to the command initializer.
+
+InitRetrigNote	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitNoteCut	Proc	Near
+
+	xor	ax, ax			; Zero AX.
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	mov	[si.CmdInfo], ax	; Save the command info byte.
+	mov	WPtr [si.CmdNumber], 30 ; Store the command number (0Fh*2).
+	ret				; Return to the command initializer.
+
+InitNoteCut	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+InitNoteDelay	Proc	Near
+
+	xor	ax, ax			; Zero AX.
+	mov	al, es:[bp+3]		; Fetch the info byte.
+	test	al, 0Fh 		; Is the tick counter zero?
+	jz	Dummy			; No NoteDelay if count is zero.
+	mov	[si.CmdInfo], ax	; Save the command info byte.
+	mov	WPtr [si.CmdNumber], 32 ; Store the command number (10h*2).
+	ret				; Return to the command initializer.
+
+InitNoteDelay	EndP
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º	    M U L T I P L E - P A S S	C O M M A N D	H A N D L E R S        º
+;º									       º
+;ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶
+;º Information about all command handlers in general:			       º
+;º									       º
+;º INPUT:	DS:BP = Pointer to current channel's Command Info Block.       º
+;º FUNCTION:	Handle the possible multiple-pass commands for each channel.   º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+VolumeSlide	Proc	Near
+
+        mov     bx, ds:[bp.CmdInfo]     ; Fetch the command info byte in BX.
+        mov     al, ds:[bp.TrueVol]     ; Fetch current volume.
+	test	bl, 0F0h		; Hi nibble set?
+	jnz	SlideVolUp		; Slide up if yes.
+	and	bl, 0Fh 		; Extract the low nibble.
+	sub	al, bl			; Slide it down.
+	jnb	SaveNewVolume		; Volume = 0 if AL < 0.
+	xor	al, al			; Zero volume.
+
+SaveNewVolume:
+        mov     ds:[bp.TrueVol], al     ; Store the new volume.
+	call	MakeCurVol		; Make the volume table address.
+	ret				; Return.
+
+SlideVolUp:
+	shr	bl, 4			; Rotate the slide count.
+	add	al, bl			; Slide it up.
+	cmp	al, 64			; AL too big?
+	jbe	SaveNewVolume		; Go save new volume if not.
+	mov	al, 64			; Set Volume to 40h (maximum).
+	jmp	SaveNewVolume		; Go save the new volume.
+
+VolumeSlide	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+PortamentoDown	Proc	Near
+
+        mov     ax, ds:[bp.CurPeriod]   ; AX = Current note's period.
+        add     ax, ds:[bp.CmdInfo]     ; Increment the period.
+	cmp	ax, MaxPeriod		; Period value out of bounds?
+	jb	$+5			; Skip next line if period in range.
+	mov	ax, MaxPeriod		; Period 856 = lowest possible note.
+        mov     ds:[bp.CurPeriod], ax   ; Save the current period value.
+	call	PeriodToAcc		; Calculate the new accumulator.
+        mov     ds:[bp.CurAcc], eax     ; Store the accumulator.
+	ret				; Return to the Main Command Handler.
+
+PortamentoDown	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+PortamentoUp	Proc	Near
+
+        mov     ax, ds:[bp.CurPeriod]   ; AX = Current note's period.
+        sub     ax, ds:[bp.CmdInfo]     ; Decrement the period.
+	cmp	ax, MinPeriod		; Period value out of bounds?
+	jge	$+5			; Skip next line if period in range.
+	mov	ax, MinPeriod		; Period 113 = highest possible note.
+        mov     ds:[bp.CurPeriod], ax   ; Save the current period value.
+	call	PeriodToAcc		; Calculate the new accumulator.
+        mov     ds:[bp.CurAcc], eax     ; Store the accumulator.
+	ret				; Return to the Main Command Handler.
+
+PortamentoUp	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+TonePortamento	Proc	Near
+
+        mov     ax, ds:[bp.PortInfo]    ; Fetch the portamento info byte in AX.
+        mov     cx, ds:[bp.CurPeriod]   ; Fetch the period of cur. note.
+        mov     dx, ds:[bp.DestPeriod]  ; EDX = Destination note's period.
+	or	dx, dx			; Is the destination period zero?
+	jz	NoPortamento		; Do nothing if DestPeriod = 0.
+	cmp	cx, dx			; Portamento Up or Portamento Down?
+	je	NoPortamento		; IF CurFreq = DestFreq THEN NoPort
+        cmp BPtr ds:[bp.TPortaDirec], 1 ; Which way we should slide the note?
+	je	PortUp			; Jump if we should slide upwards.
+PortDown:
+	add	cx, ax			; CX = New period of cur. note.
+	cmp	cx, dx			; CurFreq ó DestFreq?
+	jle	NoPortamento		; Jump if not yet.
+	mov	cx, dx			; If yes, then CurFreq = DestFreq.
+        mov WPtr ds:[bp.DestPeriod], 0  ; Clear the destination period.
+	jmp	NoPortamento		; Go save the result.
+PortUp:
+	sub	cx, ax			; CX = New period of cur. note.
+	cmp	cx, dx			; CurFreq ò DestFreq?
+	jg	NoPortamento		; Not yet.
+	mov	cx, dx			; If yes, then CurFreq = DestFreq.
+        mov WPtr ds:[bp.DestPeriod], 0  ; Clear the destination period.
+
+NoPortamento:
+        mov     ds:[bp.CurPeriod], cx   ; Store the period of current note.
+        mov     al, ds:[bp.GlisFunk]    ; Fetch the glissando/funk ctrl byte.
+	and	al, 0Fh 		; Extract the low nibble (gliss info).
+	jz	NoGlissando		; Skip glissando if zero.
+
+        mov     ax, ds:[bp.CurPeriod]   ; Fetch the period value to search.
+        movzx   bx, ds:[bp.FineTune]    ; Fetch the finetune in BX.
+	imul	bx, NoteNum		; Calculate relative offset.
+	add	bx, bx			; Convert it into a word offset.
+	cmp	ModuleType, 0		; Is this an STM?
+	jne	DoGlissando		; Skip the STM-specific code if not.
+        movzx   bx, ds:[bp.InstrNum]    ; Fetch the instrument number.
+	imul	bx, 120 		; Multiply the BX by 120.
+
+DoGlissando:
+	add	bx, Offset PeriodTable	; Final offset of the period table.
+	mov	cx, NoteNum		; Fetch the number of notes.
+	call	PeriodScan		; Search for the period in AX.
+	mov	cx, [bx]		; Fetch the period of the note to play.
+
+NoGlissando:
+	mov	ax, cx			; Copy the period value to AX.
+	call	PeriodToAcc		; Calculate the new accumulator.
+        mov     ds:[bp.CurAcc], eax     ; Store the updated accumulator value.
+	ret				; Return to the Main Command Handler.
+
+TonePortamento	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Vibrato 	Proc	Near
+
+        mov     ax, ds:[bp.VibratoInfo] ; Fetch the vibrato info byte in AX.
+        mov     di, ds:[bp.VibratoPos]  ; Get the Vibrato Table pointer in DI.
+	mov	cx, ax			; Copy the zero-extended byte to CX.
+	shr	cx, 4			; Extract the "speed" component to CL.
+        add     ds:[bp.VibratoPos], cx  ; Increment the Vibrato Position.
+	mov	cx, di			; Save the original pointer in CX.
+	and	di, 001Fh		; Extract five lowmost bits (0..31).
+
+        mov     dl, ds:[bp.WaveCtrl]    ; Fetch the wave control byte in DL.
+	and	dl, 0Fh 		; Extract the low nibble.
+	jz	VibSine 		; Use sine vibrato if zero.
+	shl	di, 3			; Rotate DI to 8 bits.
+	cmp	dl, 1			; Rampdown?
+	je	VibRampDown		; Jump if yes.
+	mov	ebx, 255		; Unknown commands.
+	jmp	VibSet			; Set the vibrato value.
+
+VibRampDown:
+	mov	bx, di			; Vibrate up by default.
+	test	cx, 20h 		; Which direction to vibrate?
+	jz	VibSet			; Vibrate up if highest bit not set.
+	mov	bx, 255 		; Otherwise vibrate down.
+	sub	bx, di			; Rampdown vibrato down.
+	jmp	VibSet			; Go store the vibrato value.
+
+VibSine:
+	movzx	bx, VibratoTable[di]	; Fetch the period of current position.
+
+VibSet:
+	and	al, 0Fh 		; Extract the "depth" component.
+	imul	bx, ax			; BX = Depth * VibratoValue
+	shr	bx, 7			; BX = Final period value to add/subst.
+        mov     ax, ds:[bp.CurPeriod]   ; Fetch the current period value.
+	sub	ax, bx			; AX = New period value.
+	test	cx, 20h 		; Which direction to vibrate?
+	jz	VibratoUp		; Vibrate up if highest bit NOT set.
+	add	ax, bx			; Back to the previous state...
+	add	ax, bx			; ...and vibrato down.
+VibratoUp:
+	call	PeriodToAcc		; Calculate the new accumulator.
+        mov     ds:[bp.CurAcc], eax     ; Store the accumulator.
+	ret				; Return to the Main Command Handler.
+
+Vibrato 	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Tremolo 	Proc	Near
+
+        mov     ax, ds:[bp.TremoloInfo] ; Fetch the tremolo info byte in AX.
+        mov     di, ds:[bp.TremoloPos]  ; Get the Vibrato Table pointer in DI.
+	mov	cx, ax			; Copy the zero-extended byte to CX.
+	shr	cx, 4			; Extract the "speed" component to CL.
+        add     ds:[bp.TremoloPos], cx  ; Increment the Tremolo Position.
+	mov	cx, di			; Save the original pointer in CX.
+	and	di, 001Fh		; Extract five lowmost bits (0..31).
+
+        mov     dl, ds:[bp.WaveCtrl]    ; Fetch the wave control byte in DL.
+	shr	dl, 4			; Extract the hi nibble.
+	or	dl, dl			; Test if the info byte is zero.
+	je	TreSine 		; Use normal sinewave if zero.
+	shl	di, 3			; Rotate DI to 8 bits.
+	cmp	dl, 1			; Rampdown?
+	je	TreRampDown		; Jump if yes.
+	mov	bx, 255 		; Unknown commands.
+	jmp	TreSet			; Set the vibrato value.
+
+TreRampDown:
+	mov	bx, di			; Vibrate up by default.
+	test	cx, 20h 		; Which direction to vibrate?
+	jz	TreSet			; Vibrate up if highest bit not set.
+	mov	bx, 255 		; Otherwise vibrate down.
+	sub	bx, di			; Downward volume vibrato.
+	jmp	TreSet			; Set the vibrato value.
+
+TreSine:
+	movzx	bx, VibratoTable[di]	; Fetch the period of current position.
+
+TreSet:
+	and	al, 0Fh 		; Extract the "depth" component.
+	imul	bx, ax			; BX = Depth * TremoloValue
+	shr	bx, 6			; BX = Final value to add/subst.
+        mov     al, ds:[bp.TrueVol]     ; Fetch current volume.
+	sub	al, bl			; AL = new volume value.
+	test	cx, 20h 		; Which direction to vibrate?
+	jnz	TremoloTest		; Vibrate down if highest bit set.
+	add	al, bl			; Back to the original value.
+	add	al, bl			; Now AL = the final volume.
+
+TremoloTest:
+	or	al, al			; Test the volume byte.
+	jns	$+4			; AL = 0 if AL < 0
+	xor	al, al			; Zero volume.
+	cmp	al, 64			; AL too great?
+	jb	$+4			; Save new volume if not.
+	mov	al, 64			; Set volume to 64 (max).
+        mov     ds:[bp.TrueVol], al     ; Store the new volume.
+	call	MakeCurVol		; Make the volume table address.
+	ret				; Return to the Main Command Handler.
+
+Tremolo 	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Arpeggio	Proc	Near
+
+        cmp     BPtr ds:[bp.CmdInfo], 0 ; Is the infobyte zero?
+	jz	Dummy			; Quit immediately if it is.
+	mov	ax, TickCounter 	; Fetch the current tick counter.
+	mov	dl, 3			; Divide the current tick counter
+	div	dl			; by 3.
+        movzx   dx, ds:[bp.CmdInfo]     ; Fetch the command info byte.
+	cmp	ah, 1			; Is the remainder 1?
+	je	Arpeg1			; Jump if yes.
+	cmp	ah, 2			; Is the remainder 2?
+	je	Arpeg2			; Jump if yes.
+        mov     ax, ds:[bp.CurPeriod]   ; Fetch the original period value.
+	jmp	SetArpPeriod		; Do not change the period this time.
+
+Arpeg1: shr	dl, 4			; Get the high nibble.
+	jmp	SetArpeggio		; Set the new accumulator value.
+Arpeg2: and	dl, 0Fh 		; Get the low nibble.
+
+SetArpeggio:
+	add	dx, dx			; Multiply the DX by 2.
+        mov     ax, ds:[bp.CurPeriod]   ; Fetch the original period value.
+        movzx   bx, ds:[bp.FineTune]    ; Fetch the finetune in BX.
+	imul	bx, NoteNum		; Calculate relative offset.
+	add	bx, bx			; Convert it into a word offset.
+	cmp	ModuleType, 0		; Is this an STM?
+	jne	SearchPeriod		; Skip the STM-specific code if not.
+        movzx   bx, ds:[bp.InstrNum]    ; Fetch the instrument number.
+	imul	bx, 120 		; Multiply the BX by 120.
+
+SearchPeriod:
+	add	bx, Offset PeriodTable	; Final offset of the period table.
+	mov	cx, NoteNum		; Fetch the number of notes.
+FindNoteLoop:
+	cmp	ax, [bx]		; Compare the next value.
+	jnb	GotTheNote		; Jump if the right value is found.
+	add	bx, 2			; Increment the index.
+	loop	FindNoteLoop		; Loop until correct note found.
+	ret				; Return if correct note not found.
+GotTheNote:
+	add	bx, dx			; Increment the index.
+	mov	ax, [bx]		; Fetch the new period value.
+
+SetArpPeriod:
+	call	PeriodToAcc		; Calculate the new accumulator.
+        mov     ds:[bp.CurAcc], eax     ; Store the accumulator.
+	ret				; Return to the Main Command Handler.
+
+Arpeggio	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Port_&_Slide	Proc	Near
+
+	call	TonePortamento		; Continue current TonePortamento...
+	call	VolumeSlide		; ...while sliding the volume.
+	ret				; Return to the Main Command Handler.
+
+Port_&_Slide	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Vibrato_&_Slide Proc	Near
+
+	call	Vibrato 		; Continue current Vibrato...
+	call	VolumeSlide		; ...while sliding the volume.
+	ret				; Return to the Main Command Handler.
+
+Vibrato_&_Slide EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+RetrigNote	Proc	Near
+
+        mov     bx, ds:[bp.CmdInfo]     ; Fetch the command info byte.
+	and	bx, 0Fh 		; Clear out the high nibble.
+	jz	Dummy			; No retrig if info byte is zero.
+	mov	ax, TickCounter 	; Fetch the current tick counter.
+	div	bl			; AH = TickCounter MOD RetrigCount
+	or	ah, ah			; Test if remainder is zero.
+	jnz	Dummy			; No restart yet if remainder <> 0.
+        mov     DPtr ds:[bp.InstrPtr],0 ; Restart the sample.
+	ret				; Return to the PT-command handler.
+
+RetrigNote	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+NoteCut 	Proc	Near
+
+        mov     ax, ds:[bp.CmdInfo]     ; Fetch the command info byte.
+	and	ax, 0Fh 		; Clear out the high nibble.
+	jz	Dummy			; Nothing to do if info byte is zero.
+	cmp	ax, TickCounter 	; Cut sample if info byte = counter.
+	jne	Dummy			; If they're not, don't cut it.
+        mov     ds:[bp.TrueVol], ah     ; Zero the volume byte.
+        mov     ds:[bp.Repeat], ah      ; Then disable sample looping.
+        mov     ds:[bp.CurVol], ah      ; Finally turn off the volume.
+	ret				; Return to the PT-command handler.
+
+NoteCut 	EndP
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+NoteDelay	Proc	Near
+
+        mov     ax, ds:[bp.CmdInfo]     ; Fetch the command info byte.
+	and	ax, 0Fh 		; Clear out the high nibble.
+	cmp	ax, TickCounter 	; If they're equal, start the sample.
+	jne	Dummy			; If they're not, don't play the note.
+        mov     ax, ds:[bp.CurPeriod]   ; Fetch the current period value.
+	call	PeriodToAcc		; Calculate the accumulator value.
+        mov     ds:[bp.CurAcc], eax     ; Store the accumulator.
+	mov	si, bp			; Copy the infoblock pointer to SI.
+	call	PlayInstrument		; Play the note.
+        setc    ds:[bp.Repeat]          ; Repeat = 1 if looped instr.
+        mov     ds:[bp.RepeatTo], di    ; Set the loop end offset.
+        mov     ds:[bp.RepeatFrom], cx  ; Set the loop start offset.
+        mov     ds:[bp.CurLen], ebx     ; Store the sample's length.
+        mov     ds:[bp.InstrSeg], ax    ; Store the sample's segment.
+        mov     DPtr ds:[bp.InstrPtr],0 ; Zero the sample offset.
+	ret				; Return to the PT-command handler.
+
+NoteDelay	EndP
+;±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±
+;±±									      ±±
+;±±			   T H E   D A T A   A R E A			      ±±
+;±±									      ±±
+;±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±±
+ReParseCommand	DB	0			; Fineslide flag.
+PattDelayCnt	DB	1			; # of notes to delay pattern.
+TickCounter	DW	0			; Tick counter (tick = 1/50 s).
+SampleOffset	DW	0			; The SampleOffset for cmd #13.
+
+		Align	4
+
+StmCmdParsers	DW	Offset Dummy		; No command 0 --> No handler.
+		DW	Offset SetTempo 	; Handler for Set Tempo.
+		DW	Offset PositionJump	; Handler for Position Jump.
+		DW	Offset BreakPattern	; Handler for Break Pattern.
+		DW	Offset SlideCommands	; VolumeSlide initializer.
+		DW	Offset SlideCommands	; PortamentoDown initializer.
+		DW	Offset SlideCommands	; PortamentoUp initializer.
+		DW	Offset InitTonePort	; Tone Portamento initializer.
+		DW	Offset InitVibrato	; Vibrato initializer.
+		DW	Offset InitTremolo	; Tremolo initializer.
+		DW	Offset SlideCommands	; Arpeggio initializer.
+		DW	Offset InitTone&VSlide	; Portamento+Slide initializer.
+		DW	Offset SlideCommands	; Vibrato+Slide initializer.
+		DW	Offset SetSampleOffs	; Handler for Set Sampleoffset.
+		DW	Offset ParsePTCommands	; ProTracker E-cmd initializer.
+
+ModCmdParsers	DW	Offset SlideCommands	; Arpeggio initializer.
+		DW	Offset SlideCommands	; PortamentoUp initializer.
+		DW	Offset SlideCommands	; PortamentoDown initializer.
+		DW	Offset InitTonePort	; Tone Portamento initializer.
+		DW	Offset InitVibrato	; Vibrato initializer.
+		DW	Offset InitTone&VSlide	; Portamento+Slide initializer.
+		DW	Offset SlideCommands	; Vibrato+Slide initializer.
+		DW	Offset InitTremolo	; Tremolo initializer.
+		DW	Offset Dummy		; No command 8 --> No handler.
+		DW	Offset SetSampleOffs	; Handler for Set Sampleoffset.
+		DW	Offset SlideCommands	; VolumeSlide initializer.
+		DW	Offset PositionJump	; Handler for Position Jump.
+		DW	Offset SetVolume	; Handler for Volume Change.
+		DW	Offset BreakPattern	; Handler for Break Pattern.
+		DW	Offset ParsePTCommands	; ProTracker E-cmd initializer.
+		DW	Offset SetTempo 	; Handler for Set Tempo.
+
+StmCmdHandlers	DW	Offset Dummy		; No command 0 --> no handler.
+		DW	Offset Dummy		; No handler for command #1.
+		DW	Offset Dummy		; No handler for command #2.
+		DW	Offset Dummy		; No handler for command #3.
+		DW	Offset VolumeSlide	; Handler for Volume Slide.
+		DW	Offset PortamentoDown	; Handler for Portamento Down.
+		DW	Offset PortamentoUp	; Handler for Portamento Up.
+		DW	Offset TonePortamento	; Handler for Tone Portamento.
+		DW	Offset Vibrato		; Handler for Vibrato.
+		DW	Offset Tremolo		; Handler for Tremolo.
+		DW	Offset Arpeggio 	; Handler for Arpeggio.
+		DW	Offset Port_&_Slide	; Handler for VolSlide+Port.
+		DW	Offset Vibrato_&_Slide	; Handler for VolSlide+Vibrato.
+		DW	Offset Dummy		; No handler for command #13.
+		DW	Offset RetrigNote	; Handler for Retrig Note.
+		DW	Offset NoteCut		; Handler for Note Cut.
+		DW	Offset NoteDelay	; Handler for Note Delay.
+
+ModCmdHandlers	DW	Offset Arpeggio 	; Handler for Arpeggio.
+		DW	Offset PortamentoUp	; Handler for Portamento Up.
+		DW	Offset PortamentoDown	; Handler for Portamento Down.
+		DW	Offset TonePortamento	; Handler for Tone Portamento.
+		DW	Offset Vibrato		; Handler for Vibrato.
+		DW	Offset Port_&_Slide	; Handler for VolSlide+Port.
+		DW	Offset Vibrato_&_Slide	; Handler for VolSlide+Vibrato.
+		DW	Offset Tremolo		; Handler for Tremolo.
+		DW	Offset Dummy		; No command 8 --> no handler.
+		DW	Offset Dummy		; No handler for command #9.
+		DW	Offset VolumeSlide	; Handler for Volume Slide.
+		DW	Offset Dummy		; No handler for command #11.
+		DW	Offset Dummy		; No handler for command #12.
+		DW	Offset Dummy		; No handler for command #13.
+		DW	Offset RetrigNote	; Handler for Retrig Note.
+		DW	Offset NoteCut		; Handler for Note Cut.
+		DW	Offset NoteDelay	; Handler for Note Delay.
+
+PT_Parsers	DW	Offset Dummy		; No handler for Set Filter.
+		DW	Offset FineSlideUp	; Handler for FineSlide Up.
+		DW	Offset FineSlideDown	; Handler for FineSlide Down.
+		DW	Offset SetGlissControl	; No Glissando Control yet.
+		DW	Offset SetVibControl	; Handler for Set Vibrato Ctrl.
+		DW	Offset SetFineTune	; Handler for Set FineTune.
+		DW	Offset PatternLoop	; Handler for PatternLoop.
+		DW	Offset SetTreControl	; Handler for Set Tremolo Ctrl.
+		DW	Offset Dummy		; No KarPlusStrong yet.
+		DW	Offset InitRetrigNote	; Handler for Retrig Note.
+		DW	Offset FineVolSldUp	; Handler for FineVolSld Up.
+		DW	Offset FineVolSldDown	; Handler for FineVolSld Down.
+		DW	Offset InitNoteCut	; Initializer for Note Cut.
+		DW	Offset InitNoteDelay	; Initializer for Note Delay.
+		DW	Offset PatternDelay	; Handler for Pattern Delay.
+		DW	Offset Dummy		; No FunkIt yet.
+
+PeriodTable	Label	Word
+	DW	856,808,762,720,678,640,604,570,538,508,480,453
+	DW	428,404,381,360,339,320,302,285,269,254,240,226
+	DW	214,202,190,180,170,160,151,143,135,127,120,113
+	DW	850,802,757,715,674,637,601,567,535,505,477,450
+	DW	425,401,379,357,337,318,300,284,268,253,239,225
+	DW	213,201,189,179,169,159,150,142,134,126,119,113
+	DW	844,796,752,709,670,632,597,563,532,502,474,447
+	DW	422,398,376,355,335,316,298,282,266,251,237,224
+	DW	211,199,188,177,167,158,149,141,133,125,118,112
+	DW	838,791,746,704,665,628,592,559,528,498,470,444
+	DW	419,395,373,352,332,314,296,280,264,249,235,222
+	DW	209,198,187,176,166,157,148,140,132,125,118,111
+	DW	832,785,741,699,660,623,588,555,524,495,467,441
+	DW	416,392,370,350,330,312,294,278,262,247,233,220
+	DW	208,196,185,175,165,156,147,139,131,124,117,110
+	DW	826,779,736,694,655,619,584,551,520,491,463,437
+	DW	413,390,368,347,328,309,292,276,260,245,232,219
+	DW	206,195,184,174,164,155,146,138,130,123,116,109
+	DW	820,774,730,689,651,614,580,547,516,487,460,434
+	DW	410,387,365,345,325,307,290,274,258,244,230,217
+	DW	205,193,183,172,163,154,145,137,129,122,115,109
+	DW	814,768,725,684,646,610,575,543,513,484,457,431
+	DW	407,384,363,342,323,305,288,272,256,242,228,216
+	DW	204,192,181,171,161,152,144,136,128,121,114,108
+	DW	907,856,808,762,720,678,640,604,570,538,508,480
+	DW	453,428,404,381,360,339,320,302,285,269,254,240
+	DW	226,214,202,190,180,170,160,151,143,135,127,120
+	DW	900,850,802,757,715,675,636,601,567,535,505,477
+	DW	450,425,401,379,357,337,318,300,284,268,253,238
+	DW	225,212,200,189,179,169,159,150,142,134,126,119
+	DW	894,844,796,752,709,670,632,597,563,532,502,474
+	DW	447,422,398,376,355,335,316,298,282,266,251,237
+	DW	223,211,199,188,177,167,158,149,141,133,125,118
+	DW	887,838,791,746,704,665,628,592,559,528,498,470
+	DW	444,419,395,373,352,332,314,296,280,264,249,235
+	DW	222,209,198,187,176,166,157,148,140,132,125,118
+	DW	881,832,785,741,699,660,623,588,555,524,494,467
+	DW	441,416,392,370,350,330,312,294,278,262,247,233
+	DW	220,208,196,185,175,165,156,147,139,131,123,117
+	DW	875,826,779,736,694,655,619,584,551,520,491,463
+	DW	437,413,390,368,347,328,309,292,276,260,245,232
+	DW	219,206,195,184,174,164,155,146,138,130,123,116
+	DW	868,820,774,730,689,651,614,580,547,516,487,460
+	DW	434,410,387,365,345,325,307,290,274,258,244,230
+	DW	217,205,193,183,172,163,154,145,137,129,122,115
+	DW	862,814,768,725,684,646,610,575,543,513,484,457
+	DW	431,407,384,363,342,323,305,288,272,256,242,228
+	DW	216,203,192,181,171,161,152,144,136,128,121,114
+	DW	850,802,757,715,674,637,601,567,535,505,477,450
+	DW	425,401,379,357,337,318,300,284,268,253,239,225
+
+		DB	2520-31*32-32 DUP (0)	; Reserve space for STM-arrays.
+FineTuneMidCs	DW	8448,8508,8568,8629,8692,8755,8189,8884
+		DW	7982,8035,8089,8144,8199,8274,8331,8389
+InstrTable	DB	31*32 DUP (0)		; A table for instr. headers.
+
+VibratoTable	DB	  0, 24, 49, 74, 97,120,141,161
+		DB	180,197,212,224,235,244,250,253
+		DB	255,253,250,244,235,224,212,197
+		DB	180,161,141,120, 97, 74, 49, 24
+
+;			   ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Memory address variables ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			   ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ModuleSegment	DW	0		; Module's segment address.
+PatBaseSeg	DW	0		; Pattern base segment.
+PatBaseOffs	DW	0		; Offset relative to PatBaseSeg.
+SongLenOffs	DW	0		; Where to find the song length.
+HighestSaved	DB	0		; # of patterns saved plus one.
+HighestUsed	DB	0		; Highest pattern actually used.
+PatternBase	DW	0		; Actual pattern base address.
+PatternSize	DW	0		; Size of a pattern in bytes.
+RowSegment	DW	0		; The pattern row address.
+OrigRowSeg	DW	0		; The unchanged row address.
+BaseOrder	DW	0		; Order list base offset.
+NextOrder	DW	0		; Pointer to the order list.
+LastOrder	DW	0		; Address of last order byte.
+CmdHandlers	DW	Offset ModCmdHandlers - Offset StmCmdHandlers
+;			    ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Miscellaneous variables ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			    ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+InstrCount	DW	0		; Maximum number of instruments.
+PatternRow	DW	1		; The rows-to-go -counter.
+NumChannels	DW	0		; Number of channels to mix.
+MasterVolume	DB	0		; The initial Master Volume.
+ModuleType	DB	0		; The module type indicator.
+TempoMode	DB	0		; 1 = Disable extended tempos.
+FiveOctaves	DB	0		; 1 = Use five octaves.
+SongSpeed	DB	0		; The speed of the song.
+MinPeriod	DW	108		; The smallest possible period.
+MaxPeriod	DW	894		; The highest possible period.
+NoteNum 	DW	36		; The number of notes.
+PlayFreq	DW	0		; Music output frequency.
+SlideOrg        DW      0               ; The original command counter.
+;			  ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ The Command Info Blocks ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			  ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+InstrPtr	EQU	0     ; D	; Current sample offset.
+InstrSeg	EQU	4     ; W	; Current sample segment.
+CmdNumber	EQU	6     ; W	; # of current command * 2.
+CmdInfo 	EQU	8     ; W	; Current command's infobyte.
+CurPeriod	EQU	10    ; W	; Current note's period value.
+CurAcc		EQU	12    ; D	; Current note's accumulator.
+CurLen		EQU	16    ; W	; Current sample's length.
+ExtraLen	EQU	18    ; W	; # of bytes exceeding 64k.
+CurVol		EQU	20    ; B	; Current sample's volume.
+Repeat		EQU	21    ; B	; Flag: 1 = looped instrument.
+RepeatFrom	EQU	22    ; W	; Instrument loop start point.
+RepeatTo	EQU	24    ; W	; Instrument loop end point.
+TrueVol 	EQU	26    ; B	; The final volume to use.
+InstrNum	EQU	27    ; B	; Current instrument number.
+InstrVol	EQU	28    ; B	; Instrument volume of current spl.
+FineTune	EQU	29    ; B	; Current finetune value.
+WaveCtrl	EQU	30    ; B	; Vibrato & Tremolo Wave Control.
+GlisFunk	EQU	31    ; B	; Glissando infobyte.
+TPortaDirec	EQU	32    ; B	; Tone Portamento direction.
+PortInfo	EQU	33    ; W	; Infobyte for portamentos.
+DestPeriod	EQU	35    ; W	; Dest. period for TonePortamento.
+VibratoPos	EQU	37    ; W	; Cur. position in vibrato waveform.
+VibratoInfo	EQU	39    ; W	; Infobyte for vibrato.
+TremoloPos	EQU	41    ; W	; Cur. position in tremolo waveform.
+TremoloInfo	EQU	43    ; W	; Infobyte for tremolo.
+LoopRowSeg	EQU	45    ; W	; Loop row segment variable.
+LoopPatRow	EQU	47    ; B	; The loop rows-to-go -counter.
+LoopCount	EQU	48    ; B	; The pattern loop counter.
+
+ChannelInfoBlock	Label	Word
+REPT 8
+	DD	0			; [SI.InstrPtr] ---- dword
+	DW	0			; [SI.InstrSeg] ---- word
+	DW	0			; [SI.CmdNumber] --- word
+	DW	0			; [SI.CmdInfo] ----- word
+	DW	428			; [SI.CurPeriod] --- word
+	DD	0			; [SI.CurAcc] ------ dword
+	DW	0			; [SI.CurLen] ------ word
+	DW	0			; [SI.ExtraLen] ---- word
+	DB	0			; [SI.CurVol] ------ byte
+	DB	0			; [SI.Repeat] ------ byte
+	DW	0			; [SI.RepeatFrom] -- word
+	DW	0			; [SI.RepeatTo] ---- word
+	DB	0			; [SI.TrueVol] ----- byte
+	DB	0			; [SI.InstrNum] ---- byte
+	DB	0			; [SI.InstrVol] ---- byte
+	DB	0			; [SI.FineTune] ---- byte
+	DB	0			; [SI.WaveCtrl] ---- byte
+	DB	0			; [SI.GlisFunk] ---- byte
+	DB	0			; [SI.TPortaDir] --- byte
+	DW	0			; [SI.PortInfo] ---- word
+	DW	0			; [SI.DestPeriod] -- word
+	DW	0			; [SI.VibratoPos] -- word
+	DW	0			; [SI.VibratoInfo] - word
+	DW	0			; [SI.TremoloPos] -- word
+	DW	0			; [SI.TremoloInfo] - word
+	DW	0			; [SI.LoopRowSeg] -- word
+	DB	0			; [SI.LoopPatRow] -- byte
+	DB	0,0			; [SI.LoopCount] --- byte
+ENDM
+ChnlInfoLen EQU ($-Offset ChannelInfoBlock)/8
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+SoundSys	EndS
+
+		End
+

@@ -1,0 +1,576 @@
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º   C O M M O N   D A T A   F O R   B O T H   P A R T S   O F	 P L A Y E R   º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+
+		Align	16
+
+VolConv 	DB	65*256 DUP (0)		; A 6-bit volume table.
+
+PeriodTable	Label	Word
+	DW	856,808,762,720,678,640,604,570,538,508,480,453
+	DW	428,404,381,360,339,320,302,285,269,254,240,226
+	DW	214,202,190,180,170,160,151,143,135,127,120,113
+	DW	850,802,757,715,674,637,601,567,535,505,477,450
+	DW	425,401,379,357,337,318,300,284,268,253,239,225
+	DW	213,201,189,179,169,159,150,142,134,126,119,113
+	DW	844,796,752,709,670,632,597,563,532,502,474,447
+	DW	422,398,376,355,335,316,298,282,266,251,237,224
+	DW	211,199,188,177,167,158,149,141,133,125,118,112
+	DW	838,791,746,704,665,628,592,559,528,498,470,444
+	DW	419,395,373,352,332,314,296,280,264,249,235,222
+	DW	209,198,187,176,166,157,148,140,132,125,118,111
+	DW	832,785,741,699,660,623,588,555,524,495,467,441
+	DW	416,392,370,350,330,312,294,278,262,247,233,220
+	DW	208,196,185,175,165,156,147,139,131,124,117,110
+	DW	826,779,736,694,655,619,584,551,520,491,463,437
+	DW	413,390,368,347,328,309,292,276,260,245,232,219
+	DW	206,195,184,174,164,155,146,138,130,123,116,109
+	DW	820,774,730,689,651,614,580,547,516,487,460,434
+	DW	410,387,365,345,325,307,290,274,258,244,230,217
+	DW	205,193,183,172,163,154,145,137,129,122,115,109
+	DW	814,768,725,684,646,610,575,543,513,484,457,431
+	DW	407,384,363,342,323,305,288,272,256,242,228,216
+	DW	204,192,181,171,161,152,144,136,128,121,114,108
+	DW	907,856,808,762,720,678,640,604,570,538,508,480
+	DW	453,428,404,381,360,339,320,302,285,269,254,240
+	DW	226,214,202,190,180,170,160,151,143,135,127,120
+	DW	900,850,802,757,715,675,636,601,567,535,505,477
+	DW	450,425,401,379,357,337,318,300,284,268,253,238
+	DW	225,212,200,189,179,169,159,150,142,134,126,119
+	DW	894,844,796,752,709,670,632,597,563,532,502,474
+	DW	447,422,398,376,355,335,316,298,282,266,251,237
+	DW	223,211,199,188,177,167,158,149,141,133,125,118
+	DW	887,838,791,746,704,665,628,592,559,528,498,470
+	DW	444,419,395,373,352,332,314,296,280,264,249,235
+	DW	222,209,198,187,176,166,157,148,140,132,125,118
+	DW	881,832,785,741,699,660,623,588,555,524,494,467
+	DW	441,416,392,370,350,330,312,294,278,262,247,233
+	DW	220,208,196,185,175,165,156,147,139,131,123,117
+	DW	875,826,779,736,694,655,619,584,551,520,491,463
+	DW	437,413,390,368,347,328,309,292,276,260,245,232
+	DW	219,206,195,184,174,164,155,146,138,130,123,116
+	DW	868,820,774,730,689,651,614,580,547,516,487,460
+	DW	434,410,387,365,345,325,307,290,274,258,244,230
+	DW	217,205,193,183,172,163,154,145,137,129,122,115
+	DW	862,814,768,725,684,646,610,575,543,513,484,457
+	DW	431,407,384,363,342,323,305,288,272,256,242,228
+	DW	216,203,192,181,171,161,152,144,136,128,121,114
+	DW	850,802,757,715,674,637,601,567,535,505,477,450
+	DW	425,401,379,357,337,318,300,284,268,253,239,225
+
+		DB	2520-31*32-32 DUP (0)	; Reserve space for STM-arrays.
+FineTuneMidCs	DW	8448,8508,8568,8629,8692,8755,8189,8884
+		DW	7982,8035,8089,8144,8199,8274,8331,8389
+InstrTable	DB	31*32 DUP (0)		; A table for instr. headers.
+
+;			   ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Memory address variables ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			   ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ModuleSegment	DW	0			; Module's segment address.
+PatBaseSegment	DW	0			; Pattern base segment.
+PatBaseOffs	DW	0			; Pattern base offset.
+RowSegment	DW	0			; The pattern row address.
+OrigRowSeg	DW	0			; The unchanged row address.
+BaseOrder	DW	0			; Order base offset.
+NextOrder	DW	0			; The order pointer.
+LastOrder	DW	0			; Maximum order number.
+CmdParsers	DW	0			; Relative offset of parsers.
+CmdHandlers	DW	0			; Relative offset of handlers.
+;			    ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Miscellaneous counters ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			    ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+PatternRow	DW	1			; The rows-to-go -counter.
+SlideCounter	DW	0			; The slide counter.
+SlideOrg	DW	0			; The backup variable.
+;			    ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Miscellaneous variables ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			    ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+MasterVolume	DB	0			; The initial Master Volume.
+ModuleType	DB	0			; The module type indicator.
+TempoMode	DB	0			; 20h = Enable extended tempos.
+FiveOctaves	DB	0			; 1 = use five octaves.
+SongSpeed	DB	0			; The speed of the song.
+MinPeriod	DW	108			; The smallest possible period.
+MaxPeriod	DW	894			; The highest possible period.
+NoteNum 	DW	36			; The number of notes.
+
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º	      D A T A	F O R	M U S I C S Y S . 3 8 6   O N L Y	       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+
+		Align	16
+
+Functions	Label	Word
+DW	Offset	StartPlaying			; Offset of function #0 code.
+DW	Offset	RetraceMix			; Offset of function #1 code.
+DW	Offset	EndPlaying			; Offset of function #2 code.
+DW	Offset	SetMstrVol			; Offset of function #3 code.
+DW	Offset	SwitchPlayMode			; Offset of function #4 code.
+DW	Offset	Dummy				; Function #5: RFU.
+DW	Offset	Dummy				; Function #6: RFU.
+DW	Offset	InitSB				; Offset of function #7 code.
+
+Initializers	Label Word
+DW	Offset	STMInit 			; Offset of STM initializer.
+DW	Offset	MODInit 			; Offset of MOD initializer.
+DW	Offset	MOD15Init			; Offset of 15-instr. MOD init.
+DW	Offset	MOD8Init			; Offset of 8-channel MOD init.
+
+DeviceHandlers	Label	Word			; The device handler offsets.
+DW	Offset	CovoxHandler			; Offset of the Covox handler.
+DW	Offset	CovoxHandler			; Offset of the Covox handler.
+DW	Offset	SbHandler			; Offset of the SB handler.
+
+SbIrqHandlers	Label	Dword			; SB IRQ handler addresses.
+DW	Offset	SbAutoHandler			; Offset of mode 0 IRQ handler.
+DW	MusicSys				; Segment of mode 0 IRQ handler.
+DW	Offset	SbCallHandler			; Offset of mode 1 IRQ handler.
+DW	MusicSys				; Segment of mode 1 IRQ handler.
+
+CvxIrqHandlers	Label	Dword			; Covox irq handler addresses.
+DW	Offset	CvxAutoHandler			; Offset of mode 0 IRQ handler.
+DW	MusicSys				; Segment of mode 0 IRQ handler.
+DW	Offset	CvxCallHandler			; Offset of mode 1 IRQ handler.
+DW	MusicSys				; Segment of mode 1 IRQ handler.
+
+OldInt08	DD	0			; Storage for old INT 08 vector.
+OldSbInt	DD	0			; Storage for old SB INT vector.
+ErrNum		DW	0			; Error number.
+SbBaseIOAddr	DW	0			; The base I/O address of SB.
+SbIrqNumber	DW	0			; Sound Blaster's Irq number.
+FreeBuffer	DW	0			; The number of the free buffer.
+NextToMix	DW	0			; The next buffer to fill.
+MixBufReloc	DW	0			; Mixing buffer relocation.
+MixCount	DW	0			; The retrace mixing count.
+PlayCount	DW	1			; Byte count for Covox handler.
+TimeCntr	DW	0			; The BIOS timer counter.
+TimeCntrOrg	DW	0			; Its backup copy.
+ScreenHertz	DW	0			; The vertical retrace speed.
+PlayFreq	DW	0			; The playing frequency.
+Device		DB	0			; The playing device number.
+OldNote 	DW	0			; The old note frequency.
+
+CalcTbl Label	Word				; The NoteHertz multipliers.
+DW	0, 0					; Multiplier for C#.
+DW	9, 8					; Multiplier for D.
+DW	0, 0					; Multiplier for D#.
+DW	5, 4					; Multiplier for E.
+DW	4, 3					; Multiplier for F.
+DW	0, 0					; Multiplier for F#.
+DW	3, 2					; Multiplier for G#.
+DW	0, 0					; Multiplier for G#.
+DW	5, 3					; Multiplier for A.
+DW	0, 0					; Multiplier for A#.
+DW     15, 8					; Multiplier for B.
+DW	2, 1					; Multiplier for the next C.
+DW	0FFFFh					; End-of-table marker.
+
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º									       º
+;º	       D A T A	 F O R	 M I X P A R S E . 3 8 6   O N L Y	       º
+;º									       º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+
+ReParseCommand	DB	0			; Fineslide flag.
+PattDelayCnt	DB	1			; # of notes to delay pattern.
+TickCounter	DW	0			; Tick counter (tick = 1/50 s).
+SampleOffset	DW	0			; The SampleOffset for cmd #13.
+MixBufOffs	DW	0			; Mixing buffer's offset.
+MixBufCount	DW	0			; Number of bytes to mix.
+DummyByte	DB	0			; A dummy byte for comparison.
+
+		Align	16
+
+StmCmdParsers	DW	Offset Dummy		; No command 0 --> No handler.
+		DW	Offset SetTempo 	; Handler for Set Tempo.
+		DW	Offset PositionJump	; Handler for Position Jump.
+		DW	Offset BreakPattern	; Handler for Break Pattern.
+		DW	Offset SlideCommands	; VolumeSlide initializer.
+		DW	Offset SlideCommands	; PortamentoDown initializer.
+		DW	Offset SlideCommands	; PortamentoUp initializer.
+		DW	Offset InitTonePort	; Tone Portamento initializer.
+		DW	Offset InitVibrato	; Vibrato initializer.
+		DW	Offset InitTremolo	; Tremolo initializer.
+		DW	Offset SlideCommands	; Arpeggio initializer.
+		DW	Offset InitTone&VSlide	; Portamento+Slide initializer.
+		DW	Offset SlideCommands	; Vibrato+Slide initializer.
+		DW	Offset SetSampleOffs	; Handler for Set Sampleoffset.
+		DW	Offset ParsePTCommands	; ProTracker E-cmd initializer.
+
+ModCmdParsers	DW	Offset SlideCommands	; Arpeggio initializer.
+		DW	Offset SlideCommands	; PortamentoUp initializer.
+		DW	Offset SlideCommands	; PortamentoDown initializer.
+		DW	Offset InitTonePort	; Tone Portamento initializer.
+		DW	Offset InitVibrato	; Vibrato initializer.
+		DW	Offset InitTone&VSlide	; Portamento+Slide initializer.
+		DW	Offset SlideCommands	; Vibrato+Slide initializer.
+		DW	Offset InitTremolo	; Tremolo initializer.
+		DW	Offset Dummy		; No command 8 --> No handler.
+		DW	Offset SetSampleOffs	; Handler for Set Sampleoffset.
+		DW	Offset SlideCommands	; VolumeSlide initializer.
+		DW	Offset PositionJump	; Handler for Position Jump.
+		DW	Offset SetVolume	; Handler for Volume Change.
+		DW	Offset BreakPattern	; Handler for Break Pattern.
+		DW	Offset ParsePTCommands	; ProTracker E-cmd initializer.
+		DW	Offset SetTempo 	; Handler for Set Tempo.
+
+StmCmdHandlers	DW	Offset Dummy		; No command 0 --> no handler.
+		DW	Offset Dummy		; No handler for command #1.
+		DW	Offset Dummy		; No handler for command #2.
+		DW	Offset Dummy		; No handler for command #3.
+		DW	Offset VolumeSlide	; Handler for Volume Slide.
+		DW	Offset PortamentoDown	; Handler for Portamento Down.
+		DW	Offset PortamentoUp	; Handler for Portamento Up.
+		DW	Offset TonePortamento	; Handler for Tone Portamento.
+		DW	Offset Vibrato		; Handler for Vibrato.
+		DW	Offset Tremolo		; Handler for Tremolo.
+		DW	Offset Arpeggio 	; Handler for Arpeggio.
+		DW	Offset Port_&_Slide	; Handler for VolSlide+Port.
+		DW	Offset Vibrato_&_Slide	; Handler for VolSlide+Vibrato.
+		DW	Offset Dummy		; No handler for command #13.
+		DW	Offset RetrigNote	; Handler for Retrig Note.
+		DW	Offset NoteCut		; Handler for Note Cut.
+		DW	Offset NoteDelay	; Handler for Note Delay.
+
+ModCmdHandlers	DW	Offset Arpeggio 	; Handler for Arpeggio.
+		DW	Offset PortamentoUp	; Handler for Portamento Up.
+		DW	Offset PortamentoDown	; Handler for Portamento Down.
+		DW	Offset TonePortamento	; Handler for Tone Portamento.
+		DW	Offset Vibrato		; Handler for Vibrato.
+		DW	Offset Port_&_Slide	; Handler for VolSlide+Port.
+		DW	Offset Vibrato_&_Slide	; Handler for VolSlide+Vibrato.
+		DW	Offset Tremolo		; Handler for Tremolo.
+		DW	Offset Dummy		; No command 8 --> no handler.
+		DW	Offset Dummy		; No handler for command #9.
+		DW	Offset VolumeSlide	; Handler for Volume Slide.
+		DW	Offset Dummy		; No handler for command #11.
+		DW	Offset Dummy		; No handler for command #12.
+		DW	Offset Dummy		; No handler for command #13.
+		DW	Offset RetrigNote	; Handler for Retrig Note.
+		DW	Offset NoteCut		; Handler for Note Cut.
+		DW	Offset NoteDelay	; Handler for Note Delay.
+
+PT_Parsers	DW	Offset Dummy		; No handler for Set Filter.
+		DW	Offset FineSlideUp	; Handler for FineSlide Up.
+		DW	Offset FineSlideDown	; Handler for FineSlide Down.
+		DW	Offset SetGlissControl	; No Glissando Control yet.
+		DW	Offset SetVibControl	; Handler for Set Vibrato Ctrl.
+		DW	Offset SetFineTune	; Handler for Set FineTune.
+		DW	Offset PatternLoop	; Handler for PatternLoop.
+		DW	Offset SetTreControl	; Handler for Set Tremolo Ctrl.
+		DW	Offset Dummy		; No KarPlusStrong yet.
+		DW	Offset InitRetrigNote	; Handler for Retrig Note.
+		DW	Offset FineVolSldUp	; Handler for FineVolSld Up.
+		DW	Offset FineVolSldDown	; Handler for FineVolSld Down.
+		DW	Offset InitNoteCut	; Initializer for Note Cut.
+		DW	Offset InitNoteDelay	; Initializer for Note Delay.
+		DW	Offset PatternDelay	; Handler for Pattern Delay.
+		DW	Offset Dummy		; No FunkIt yet.
+
+VibratoTable	DB	  0, 24, 49, 74, 97,120,141,161
+		DB	180,197,212,224,235,244,250,253
+		DB	255,253,250,244,235,224,212,197
+		DB	180,161,141,120, 97, 74, 49, 24
+
+;			  ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ The Command Info Blocks ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;			  ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+CmdNumber	EQU	0			; # of current command * 2.
+CmdInfo 	EQU	2			; Current command's infobyte.
+VibratoPos	EQU	4			; Position in vibrato waveform.
+VibratoInfo	EQU	6			; Infobyte for vibrato.
+PortInfo	EQU	8			; Infobyte for portamentos.
+CurLenPtr	EQU	10			; Ptr to spl length in mixer.
+CurAccPtr	EQU	12			; Ptr to accumulator in mixer.
+CurVolPtr	EQU	14			; Ptr to volume in mixer.
+CurSplPtr	EQU	16			; Ptr to current SamplePointer.
+DestPeriod	EQU	18			; Dest. period for TonePorta.
+CurPeriod	EQU	20			; Current period value.
+TremoloPos	EQU	22			; Position in tremolo waveform.
+TremoloInfo	EQU	24			; Infobyte for tremolo.
+WaveCtrl	EQU	26			; Vibrato & Tremolo WaveCtrl.
+Repeat		EQU	27			; Flag: 1 = instr. is looped.
+RepeatFrom	EQU	28			; Instrument loop start point.
+RepeatTo	EQU	30			; Instrument loop end point.
+InstNum 	EQU	32			; Current instrument number.
+GlisFunk	EQU	33			; Glissando infobyte.
+TrueVol 	EQU	34			; The final volume to set.
+InstrVol	EQU	35			; Instrument vol. of cur. spl.
+ExtraLen	EQU	36			; # of bytes exceeding 64k.
+LoopRowSeg	EQU	38			; Loop row segment variable.
+LoopPatRow	EQU	40			; The loop rows-to-go -counter.
+LoopCount	EQU	41			; The pattern loop counter.
+TPortaDirec	EQU	42			; Tone Portamento direction.
+FineTune	EQU	43			; Finetune value.
+
+Channel1Cmd	Label	Word
+CmdNum1 	DW	0
+CmdInfo1	DW	0
+VibPos1 	DW	0
+VibInfo1	DW	0
+PortInfo1	DW	0
+LenPtr1 	DW	Offset Len1+2
+AccPtr1 	DW	Offset Acc1+3
+VolPtr1 	DW	Offset Vol1+4
+SplPtr1 	DW	Offset SamplePtr1
+DestPeriod1	DW	0
+CurPeriod1	DW	428
+TrePos1 	DW	0
+TreInfo1	DW	0
+WaveCont1	DB	0
+Repeat1 	DB	0
+RepeatFrom1	DW	0
+RepeatTo1	DW	0
+InstNum1	DB	0
+GlisFunk1	DB	0
+TrueVol1	DB	0
+InstrVol1	DB	0
+ExtraLen1	DW	0
+LoopRowSeg1	DW	0
+LoopPatRow1	DB	0
+LoopCount1	DB	0
+TPortaDirec1	DB	0
+FineTune1	DB	0
+
+Channel2Cmd	Label	Word
+CmdNum2 	DW	0
+CmdInfo2	DW	0
+VibPos2 	DW	0
+VibInfo2	DW	0
+PortInfo2	DW	0
+LenPtr2 	DW	Offset Len2+2
+AccPtr2 	DW	Offset Acc2+3
+VolPtr2 	DW	Offset Vol2+4
+SplPtr2 	DW	Offset SamplePtr2
+DestPeriod2	DW	0
+CurPeriod2	DW	428
+TrePos2 	DW	0
+TreInfo2	DW	0
+WaveCont2	DB	0
+Repeat2 	DB	0
+RepeatFrom2	DW	0
+RepeatTo2	DW	0
+InstNum2	DB	0
+GlisFunk2	DB	0
+TrueVol2	DB	0
+InstrVol2	DB	0
+ExtraLen2	DW	0
+LoopRowSeg2	DW	0
+LoopPatRow2	DB	0
+LoopCount2	DB	0
+TPortaDirec2	DB	0
+FineTune2	DB	0
+
+Channel3Cmd	Label	Word
+CmdNum3 	DW	0
+CmdInfo3	DW	0
+VibPos3 	DW	0
+VibInfo3	DW	0
+PortInfo3	DW	0
+LenPtr3 	DW	Offset Len3+2
+AccPtr3 	DW	Offset Acc3+3
+VolPtr3 	DW	Offset Vol3+4
+SplPtr3 	DW	Offset SamplePtr3
+DestPeriod3	DW	0
+CurPeriod3	DW	428
+TrePos3 	DW	0
+TreInfo3	DW	0
+WaveCont3	DB	0
+Repeat3 	DB	0
+RepeatFrom3	DW	0
+RepeatTo3	DW	0
+InstNum3	DB	0
+GlisFunk3	DB	0
+TrueVol3	DB	0
+InstrVol3	DB	0
+ExtraLen3	DW	0
+LoopRowSeg3	DW	0
+LoopPatRow3	DB	0
+LoopCount3	DB	0
+TPortaDirec3	DB	0
+FineTune3	DB	0
+
+Channel4Cmd	Label	Word
+CmdNum4 	DW	0
+CmdInfo4	DW	0
+VibPos4 	DW	0
+VibInfo4	DW	0
+PortInfo4	DW	0
+LenPtr4 	DW	Offset Len4+2
+AccPtr4 	DW	Offset Acc4+3
+VolPtr4 	DW	Offset Vol4+4
+SplPtr4 	DW	Offset SamplePtr4
+DestPeriod4	DW	0
+CurPeriod4	DW	428
+TrePos4 	DW	0
+TreInfo4	DW	0
+WaveCont4	DB	0
+Repeat4 	DB	0
+RepeatFrom4	DW	0
+RepeatTo4	DW	0
+InstNum4	DB	0
+GlisFunk4	DB	0
+TrueVol4	DB	0
+InstrVol4	DB	0
+ExtraLen4	DW	0
+LoopRowSeg4	DW	0
+LoopPatRow4	DB	0
+LoopCount4	DB	0
+TPortaDirec4	DB	0
+FineTune4	DB	0
+
+Channel5Cmd	Label	Word
+CmdNum5 	DW	0
+CmdInfo5	DW	0
+VibPos5 	DW	0
+VibInfo5	DW	0
+PortInfo5	DW	0
+LenPtr5 	DW	Offset Len5+2
+AccPtr5 	DW	Offset Acc5+3
+VolPtr5 	DW	Offset Vol5+4
+SplPtr5 	DW	Offset SamplePtr5
+DestPeriod5	DW	0
+CurPeriod5	DW	428
+TrePos5 	DW	0
+TreInfo5	DW	0
+WaveCont5	DB	0
+Repeat5 	DB	0
+RepeatFrom5	DW	0
+RepeatTo5	DW	0
+InstNum5	DB	0
+GlisFunk5	DB	0
+TrueVol5	DB	0
+InstrVol5	DB	0
+ExtraLen5	DW	0
+LoopRowSeg5	DW	0
+LoopPatRow5	DB	0
+LoopCount5	DB	0
+TPortaDirec5	DB	0
+FineTune5	DB	0
+
+Channel6Cmd	Label	Word
+CmdNum6 	DW	0
+CmdInfo6	DW	0
+VibPos6 	DW	0
+VibInfo6	DW	0
+PortInfo6	DW	0
+LenPtr6 	DW	Offset Len6+2
+AccPtr6 	DW	Offset Acc6+3
+VolPtr6 	DW	Offset Vol6+4
+SplPtr6 	DW	Offset SamplePtr6
+DestPeriod6	DW	0
+CurPeriod6	DW	428
+TrePos6 	DW	0
+TreInfo6	DW	0
+WaveCont6	DB	0
+Repeat6 	DB	0
+RepeatFrom6	DW	0
+RepeatTo6	DW	0
+InstNum6	DB	0
+GlisFunk6	DB	0
+TrueVol6	DB	0
+InstrVol6	DB	0
+ExtraLen6	DW	0
+LoopRowSeg6	DW	0
+LoopPatRow6	DB	0
+LoopCount6	DB	0
+TPortaDirec6	DB	0
+FineTune6	DB	0
+
+Channel7Cmd	Label	Word
+CmdNum7 	DW	0
+CmdInfo7	DW	0
+VibPos7 	DW	0
+VibInfo7	DW	0
+PortInfo7	DW	0
+LenPtr7 	DW	Offset Len7+2
+AccPtr7 	DW	Offset Acc7+3
+VolPtr7 	DW	Offset Vol7+4
+SplPtr7 	DW	Offset SamplePtr7
+DestPeriod7	DW	0
+CurPeriod7	DW	428
+TrePos7 	DW	0
+TreInfo7	DW	0
+WaveCont7	DB	0
+Repeat7 	DB	0
+RepeatFrom7	DW	0
+RepeatTo7	DW	0
+InstNum7	DB	0
+GlisFunk7	DB	0
+TrueVol7	DB	0
+InstrVol7	DB	0
+ExtraLen7	DW	0
+LoopRowSeg7	DW	0
+LoopPatRow7	DB	0
+LoopCount7	DB	0
+TPortaDirec7	DB	0
+FineTune7	DB	0
+
+Channel8Cmd	Label	Word
+CmdNum8 	DW	0
+CmdInfo8	DW	0
+VibPos8 	DW	0
+VibInfo8	DW	0
+PortInfo8	DW	0
+LenPtr8 	DW	Offset Len8+2
+AccPtr8 	DW	Offset Acc8+3
+VolPtr8 	DW	Offset Vol8+4
+SplPtr8 	DW	Offset SamplePtr8
+DestPeriod8	DW	0
+CurPeriod8	DW	428
+TrePos8 	DW	0
+TreInfo8	DW	0
+WaveCont8	DB	0
+Repeat8 	DB	0
+RepeatFrom8	DW	0
+RepeatTo8	DW	0
+InstNum8	DB	0
+GlisFunk8	DB	0
+TrueVol8	DB	0
+InstrVol8	DB	0
+ExtraLen8	DW	0
+LoopRowSeg8	DW	0
+LoopPatRow8	DB	0
+LoopCount8	DB	0
+TPortaDirec8	DB	0
+FineTune8	DB	0
+
+;		       ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¶ Pointers to current instruments ÇÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+;		       ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+SamplePtr1	Label	Fword
+InstrPointer1	DD	Offset Dummybyte	; The instrument byte pointer.
+InstrumentSeg1	DW	0			; The segment of the sample.
+
+SamplePtr2	Label	Fword
+InstrPointer2	DD	Offset Dummybyte	; The instrument byte pointer.
+InstrumentSeg2	DW	0			; The segment of the sample.
+
+SamplePtr3	Label	Fword
+InstrPointer3	DD	Offset Dummybyte	; The instrument byte pointer.
+InstrumentSeg3	DW	0			; The segment of the sample.
+
+SamplePtr4	Label	Fword
+InstrPointer4	DD	Offset Dummybyte	; The instrument byte pointer.
+InstrumentSeg4	DW	0			; The segment of the sample.
+
+SamplePtr5	Label	Fword
+InstrPointer5	DD	Offset Dummybyte	; The instrument byte pointer.
+InstrumentSeg5	DW	0			; The segment of the sample.
+
+SamplePtr6	Label	Fword
+InstrPointer6	DD	Offset Dummybyte	; The instrument byte pointer.
+InstrumentSeg6	DW	0			; The segment of the sample.
+
+SamplePtr7	Label	Fword
+InstrPointer7	DD	Offset Dummybyte	; The instrument byte pointer.
+InstrumentSeg7	DW	0			; The segment of the sample.
+
+SamplePtr8	Label	Fword
+InstrPointer8	DD	Offset Dummybyte	; The instrument byte pointer.
+InstrumentSeg8	DW	0			; The segment of the sample.
+

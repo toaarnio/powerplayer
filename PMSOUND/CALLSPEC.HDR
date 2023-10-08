@@ -1,0 +1,69 @@
+
+ModMidCFreq     EQU     8287
+PanPosLeft      EQU     80  ;100
+PanPosRight     EQU     176 ;140
+NumEffectChans	EQU	1
+
+;컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴�
+
+DrvInited       EQU     -4
+Sd_Reset        EQU     00h*4           ; Reset the soundcard device
+Sd_GetInfo	EQU	01h*4		; Get offset to SD info block
+Sd_AllocChan	EQU	02h*4		; Allocate channels
+Sd_RegMemSmpl	EQU	03h*4		; Register a sample in memory
+Sd_ChunkLoad	EQU	04h*4		; Request chunk load a sample
+Sd_SetSample	EQU	05h*4		; Set sample number and offset
+Sd_SetVolume	EQU	06h*4		; Set the channel volume
+Sd_SetBalance	EQU	07h*4		; Set the left/right balance
+Sd_SetFreq      EQU     08h*4           ; Set sample frequency
+Sd_SetMastVol   EQU     09h*4           ; Set the master output volume
+Sd_Flush        EQU     0Ah*4           ; Execute all commands in the cmd buffer
+Sd_StopSample   EQU     0Bh*4           ; Stops playing the sample
+Sd_DeInit       EQU     0Fh*4           ; Uninstall the soudcard driver
+
+Sd_GetSample	EQU	15h*4		; Get sample number and offset
+Sd_GetVolume	EQU	16h*4		; Get the channel volume
+Sd_GetBalance	EQU	17h*4		; Get the left/right balance
+Sd_GetFreq      EQU     18h*4           ; Get sample speed accumulato
+
+Sd_TmrReset     EQU     20h*4           ; Reset the timer device
+Sd_TmrReqCall   EQU     21h*4           ; Request timer to call to address
+Sd_TmrStop      EQU     22h*4           ; Stop the timer.
+Sd_TmrDeInit    EQU     2Fh*4           ; Uninstall the timer driver
+
+Mus_Reset       EQU     30h*4           ; Reset music player
+Mus_GetInfo	EQU	31h*4		; Get offset to player info block
+Mus_Start	EQU	32h*4
+Mus_Stop	EQU	33h*4
+Mus_Resume	EQU	34h*4
+Mus_SetPos	EQU	35h*4
+Mus_GetPos	EQU	36h*4
+Mus_Load        EQU     3Dh*4
+Mus_UnLoad      EQU     3Eh*4
+Mus_DeInit	EQU	3Fh*4		; Uninstall the music player
+
+Snd_Reset       EQU     40h*4           ; Reset sound effect player
+Snd_GetInfo     EQU     41h*4           ; Get offset to SND info block
+Snd_LoadSample  EQU     42h*4
+Snd_PlaySample  EQU     43h*4
+Snd_DeInit      EQU     4Fh*4           ; Uninstall the sound player
+
+NumFunctions    EQU     50h
+
+;컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴�
+
+SdPlayingModes  EQU     0               ; byte: bit0 = HW-mixing
+                                        ;       bit1 = CallPlay
+                                        ;       bit2 = AutoPlay
+SdOutputModes	EQU	01h		; byte: bit0 = 8bit mono
+					;	bit1 = 8bit stereo
+					;	bit2 = 16bit mono
+					;	bit3 = 16bit stereo
+SdLoadMode      EQU     02h             ; byte: bit0 = MemLoad
+                                        ;       bit1 = ChunkLoad
+SdBaseAddr      EQU     04h             ; dword: base port address
+SdDMA           EQU     08h             ; dword: DMA channel
+SdIRQ           EQU     0Ch             ; dword: IRQ number
+SdOutputFreq    EQU     10h             ; dword: output frequency
+SdIBLen         EQU     14h
+

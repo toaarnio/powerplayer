@@ -1,0 +1,20 @@
+TITLE GMD.INC - EMF PM Sound System - General Mixer Device v0.2 18.12.94
+;컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴�
+
+extrn   Gmd_Reset:Near
+extrn	Gmd_AllocChan:Near
+extrn	Gmd_RegMemSmpl:Near
+extrn	Gmd_ChunkLoad:Near
+extrn	Gmd_SetSample:Near
+extrn	Gmd_StopSample:Near
+extrn	Gmd_SetVolume:Near
+extrn	Gmd_SetBalance:Near
+extrn	Gmd_SetFreq:Near
+extrn	Gmd_SetMastVol:Near
+extrn	Gmd_TmrReset:Near
+extrn	Gmd_TmrReqCall:Near
+extrn	Gmd_TmrDeInit:Near
+
+extrn	Gmd_Init:Near
+extrn	Gmd_DeInit:Near
+extrn	Gmd_Mixer:Near

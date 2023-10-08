@@ -1,0 +1,30 @@
+TITLE SOUNDSYS.HDR - Header for the EMF soundsys, v1.00 - 31.07.94
+;ฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+        .386P
+;ฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+Code32  Segment Para Public Use32
+        ASSUME CS:Code32, DS:Code32
+
+        INCLUDE pmode.inc
+
+;ีัอออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออัธ
+;ณณ                                 C O D E                                   ณณ
+;ิฯอออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออออฯพ
+
+Extrn   DetectCard:Near
+Extrn   InitSound:Near
+Extrn   LoadMusic:Near
+Extrn   StartMusic:Near
+Extrn   StopMusic:Near
+Extrn   ResumeMusic:Near
+Extrn   GetMusicPos:Near
+Extrn   SetMusicPos:Near
+Extrn   LoadSample:Near
+Extrn   PlaySample:Near
+Extrn   SetMasterVol:Near
+Extrn   GetDriverInfo:Near
+Extrn   DeInitSound:Near
+
+;ฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+
+Code32  EndS

@@ -1,0 +1,336 @@
+ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+		      EMF Protected Mode Sound System
+
+                     Standardiluonnos v0.07 09.10.1994
+ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+
+Systeemin osien v„linen hierarkia:
+
+			    ÚÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+                            ³ Frontend program ³
+                            ÀÄÄÄÄÄÄÄÄÂÄÄÄÄÄÄÄÄÄÙ
+                                ÚÄÄÄÄÁÄÄÄÄÄ¿
+                                ³ Soundsys ³
+                                ÀÄÄÄÄÂÄÄÄÄÄÙ
+                             ÚÄÄÄÄÄÄÄÅÄÄÄÄÄÄÂÄÄÄÄÄÄÄÄÄÄÄÄÄÂ Ä Ä Ä
+                       ÚÄÄÄÄÄÁÄÄÄÄÄ¿ ³ÚÄÄÄÄÄÁÄÄÄÄÄ¿ ÚÄÄÄÄÄÁÄÄÄÄÄ¿
+                       ³ FX Driver ³ ³³ MODPlayer ³ ³ S3MPlayer ³
+                       ÀÄÄÄÄÄÂÄÄÄÄÄÙ ³ÀÄÄÄÄÄÂÄÄÄÄÄÙ ÀÄÄÄÄÄÂÄÄÄÄÄÙ
+                             ÀÄÄÄÄÄÄÄÅÄÄÄÄÄÄÁÄÄÄÄÄÄÄÄÄÄÄÄÄÙ
+                                     ³
+    Ä Ä Ä ÄÂÄÄÄÄÄÄÄÄÄÄÄÄÄÄÂÄÄÄÄÄÄÄÄÂÄÁÄÄÄÄÂÄÄÄÄÄÄÄÄÄÄÄÄÄÂ Ä Ä Ä
+     ÚÄÄÄÄÄÁÄÄÄÄÄ¿ Ú Ä Ä Ä Ä Ä Ä ¿ ³ ÚÄÄÄÄÁÄÄÄÄÄ¿ Ú Ä Ä Á Ä Ä ¿
+     ³ GUSDriver ³   AWE32Driver   ³ ³ SBDriver ³   PASDriver
+     ÀÄÄÄÄÄÂÄÄÄÄÄÙ À Ä Ä Ä Ä Ä Ä Ù ³ ÀÄÄÄÄÂÄÄÄÄÄÙ À Ä Ä Â Ä Ä Ù
+            Ä Ä Ä Ä Ä Ä Ä Ä Ä Ä Ä ÄÁÄÄÄÄÄÄÅÄÄÄÄÄÄÄÄÄÄÄÄÄÁÄÄÄÄÄ¿
+                              ÚÄÄÄÄÄÄÄÄÄÄÄÁÄÄÄÄÄÄÄÄÄÄ¿ ÚÄÄÄÄÄÄÁÄÄÄÄÄÄ¿
+			      ³ General Mixer Device ³ ³ DMA Manager ³
+			      ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÙ ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÙ
+
+ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+
+Soundsyssin soundcard devicelt„ vaatimat rutiinit:
+
+Sd_Reset	EQU	00h*4		; Reset the soundcard device
+Sd_GetInfo	EQU	01h*4		; Get offset to SD info block
+Sd_AllocChan	EQU	02h*4		; Allocate channels
+Sd_RegMemSmpl	EQU	03h*4		; Register a sample in memory
+Sd_ChunkLoad	EQU	04h*4		; Request chunk load a sample
+Sd_SetSample	EQU	05h*4		; Set sample number and offset
+Sd_SetVolume	EQU	06h*4		; Set the channel volume
+Sd_SetBalance	EQU	07h*4		; Set the left/right balance
+Sd_SetFreq      EQU     08h*4           ; Set sample frequency
+Sd_SetMastVol   EQU     09h*4           ; Set the master output volume
+Sd_Flush        EQU     0Ah*4           ; Execute all commands in the cmd buffer
+Sd_StopSample   EQU     0Bh*4           ; Stops playing the sample
+Sd_DeInit       EQU     0Fh*4           ; Uninstall the soudcard driver
+
+Sd_TmrReset	EQU	20h*4		; Reset the timer device
+Sd_TmrReqCall	EQU	21h*4		; Request timer to call to address
+Sd_TmrStop      EQU     22h*4           ; Stops the timer
+Sd_TmrDeInit	EQU	2Fh*4		; Uninstall the timer driver
+
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_Reset					       º
+;º									       º
+;º FUNCTION:    Initialize the sound card device for sound output.             º
+;º PARAMETERS:  None.                                                          º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_GetInfo					       º
+;º									       º
+;º FUNCTION:    Return a pointer to the soundcard info block.                  º
+;º PARAMETERS:  None.                                                          º
+;º RETURNS:     EAX --> The requested info block.                              º
+;º              CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_AllocChan					       º
+;º									       º
+;º FUNCTION:    Allocate a channel.                                            º
+;º PARAMETERS:  None.                                                          º
+;º RETURNS:     EAX = Channel handle.                                          º
+;º              CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_RegMemSmpl					       º
+;º									       º
+;º FUNCTION:    Register a memory sample.                                      º
+;º PARAMETERS:  ESI --> Sample data.                                           º
+;º              EAX --> Sample info block.                                     º
+;º RETURNS:     EAX = Sample handle.                                           º
+;º              CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_ChunkLoad					       º
+;º									       º
+;º FUNCTION:    Chunk load a sample.                                           º
+;º PARAMETERS:  ESI --> Chunk buffer.                                          º
+;º              ECX = Chunk buffer length.                                     º
+;º              EAX --> Sample info block.                                     º
+;º              EDX --> The chunk loader routine in the module loader.         º
+;º RETURNS:     EAX = Sample handle.                                           º
+;º              CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_SetSample					       º
+;º									       º
+;º FUNCTION:    Play a sample on a channel.                                    º
+;º PARAMETERS:  EAX = Channel handle.                                          º
+;º              EDX = Sample handle.                                           º
+;º              ESI = Sample offset.                                           º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_SetVolume					       º
+;º									       º
+;º FUNCTION:    Set the volume of a channel.                                   º
+;º PARAMETERS:  EAX = Channel handle.                                          º
+;º              EDX = Volume [0..255]                                          º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_SetBalance					       º
+;º									       º
+;º FUNCTION:    Set the balance of a channel.                                  º
+;º PARAMETERS:  EAX = Channel handle.                                          º
+;º              EDX = Balance: 0 = left, 128 = middle, 255 = right.            º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_SetFreq                                            º
+;º									       º
+;º FUNCTION:    Set the playing frequency of a sample.                         º
+;º PARAMETERS:  EAX = Channel handle.                                          º
+;º              EDX = Sample frequency.                                        º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_SetMastVol                                         º
+;º									       º
+;º FUNCTION:    Set the master output volume.                                  º
+;º PARAMETERS:  EAX = Master volume [0..255].                                  º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_Flush                                              º
+;º									       º
+;º FUNCTION:    Execute all commands in the driver's command buffer (if any).  º
+;º PARAMETERS:  None.                                                          º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_StopSample                                         º
+;º									       º
+;º FUNCTION:    Stops playing a sample on a channel.                           º
+;º PARAMETERS:  EAX = Channel handle.                                          º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_DeInit                                             º
+;º									       º
+;º FUNCTION:    Deinitialize the sound card.                                   º
+;º PARAMETERS:  None.                                                          º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_TmrReset                                           º
+;º									       º
+;º FUNCTION:    Reset the timer device.                                        º
+;º PARAMETERS:  None.                                                          º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_TmrReqCall                                         º
+;º									       º
+;º FUNCTION:    Set the timer call address and frequency.                      º
+;º PARAMETERS:  EDI --> The timer call address.                                º
+;º              EAX = Timer frequency in Hz, multiplied by 65536.              º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_TmrStop                                            º
+;º									       º
+;º FUNCTION:    Stop the timer.                                                º
+;º PARAMETERS:  None.                                                          º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+;ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+;º Soundsys Function ID: Sd_TmrDeInit                                          º
+;º                                                                             º
+;º FUNCTION:    Deinitialize the timer device.                                 º
+;º PARAMETERS:  None.                                                          º
+;º RETURNS:     CF set on error, EAX --> Error message.                        º
+;ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+
+ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Soundcard info block:
+
+SdPlayingModes	EQU	0		; byte: bit0 = HW-mixing
+					;	bit1 = CallPlay
+					;	bit2 = AutoPlay
+SdOutputModes	EQU	01h		; byte: bit0 = 8bit mono
+					;	bit1 = 8bit stereo
+					;	bit2 = 16bit mono
+					;	bit3 = 16bit stereo
+SdLoadMode      EQU     02h             ; byte: bit0 = memload
+                                        ;       bit1 = chunkload
+Reserved        EQU     03h             ; byte: reserved
+SdBaseAddr      EQU     04h             ; dword: base port address
+SdDMA           EQU     08h             ; dword: DMA channel
+SdIRQ           EQU     0Ch             ; dword: IRQ number
+SdOutputFreq    EQU     10h             ; dword: output frequency
+ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Sample info block:
+
+Dword   SmplLen
+Dword	SmplRepeatFrom
+Dword	SmplRepeatTo
+Byte	SmplFlags:	76543210
+			    ³³³³
+			    ³³³ÀÄÄ 0: No repeat, 1: Repeating
+			    ³ÀÁÄÄÄ Sample bits 00: 8 bits
+			    ³		       01: 12 bits
+			    ³		       10: 16 bits
+			    ÀÄÄÄÄÄ 0: Mono, 1: Stereo
+Byte	Unused
+ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+
+ÖÒÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÒ·
+ºº		   G E N E R A L   M I X E R   D E V I C E		      ºº
+ÓĞÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄĞ½
+ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+º			Soundsyssin vaatimat rutiinit			       º
+ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ÚÄÄ Gmd_AllocChan ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Incrementoi kanavien m„„r„„
+	- Laskee uuden volumetaulukon
+	- palauttaa "channel handlen"
+
+ÚÄÄ Gmd_RegMemSmpl ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Kopsaa annetut infot mikserin infoblokkiin
+
+ÚÄÄ Gmd_SetSample ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Asettaa halutulle mikserin kanavalle samplen soimaan
+
+ÚÄÄ Gmd_SetVolume ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Asettaa kanavan volumen
+
+ÚÄÄ Gmd_SetBalance ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Asettaa kanavan balanssin (ei vaikutusta jos mikseri ei tue pannausta)
+
+ÚÄÄ Gmd_SetAcc ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Asettaa kanavan akkumulaattorin
+
+ÚÄÄ Gmd_SetMasterVolume ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Asettaa kanavan master volumen
+
+ÚÄÄ Gmd_TmrReset ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Kertoo mikserille ett„ timer-simulaatio on p„„ll„
+
+ÚÄÄ Gmd_TmrReqCall ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Antaa parametrina annetun osoitteen mikserille
+
+ÚÄÄ Gmd_TmrDeInit ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Kertoo mikserille ett„ timer-simulaatio ei ole p„„ll„
+
+ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+º			      Sis„iset rutiinit 			       º
+ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ÚÄÄ Gmd_Mixer ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Miksaa tarvittavan m„„r„n dataa DMA-bufferiin
+
+ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+Mikserin instrument info block:
+
+InstrPtr	EQU	0			; dword
+InstrLen	EQU	InstrPtr+4		; dword
+InstrRepeatFrom EQU	InstrLen+4		; dword
+InstrRepeatTo	EQU	InstrRepeatFrom+4	; dword
+InstrFlags	EQU	InstrRepeatTo+4 	; byte
+InstrFree       EQU     InstrFlags+1            ; byte
+IIB_Len         EQU     InstrFree+1
+ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ
+
+ÖÒÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÒ·
+ºº			     S B   D R I V E R				      ºº
+ÓĞÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄĞ½
+Soundsyssille annettavat rutiinit:
+
+SB_Reset	       ; normaali resetointi
+SB_GetInfo	       ; annetaan pointteri infoblokkiin
+Gmd_AllocChan	       ; varataan kanava mikserilt„ ja lasketaan vol. taulukko
+Gmd_RegMemSmpl	       ; kopsataan instrumentin infot mikserin infoblokkiin
+Gmd_SetSample	       ; asetetaan mikserin kanavalle sample soimaan
+Gmd_SetVolume	       ; asetetaan mikserin kanavan volume
+Gmd_SetBalance	       ; asetetaan mikserin kanavan balanssi (ei vaikutusta)
+Gmd_SetAcc	       ; asetetaan mikserin kanavan akkumulaattori
+Gmd_MasterVolume       ; asetetaan master volume (Gmd_SetVolume k„ytt„„ sit„)
+SB_DeInit	       ; uninitialisoidaan SB ja Gmd
+Gmd_TmrReset	       ; kerrotaan mikserille ett„ cmd-update on p„„ll„
+Gmd_TmrReqCall	       ; tungetaan osoite variableen jota mikseri k„ytt„„
+Gmd_TmrDeInit	       ; kerrotaan mikserille ett„ cmd-update ei ole p„„ll„
+ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+º			Soundsyssin vaatimat rutiinit			       º
+ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ÚÄÄ SBDriver ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Testaa SB:n olemassaolon
+	- Asettaa callitaulukoihin omat rutiininsa ja Gmd:n rutiinit
+
+ÚÄÄ SB_Reset ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Resetoi SB:n hw-tasolla
+	- initialisoi mikserin
+	- Asettaa DMA-siirron p„„lle
+
+ÚÄÄ SB_GetInfo ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- Palauttaa pointterin infoblokkiin
+
+ÚÄÄ SB_DeInit ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- lopettaa DMA-siirron
+	- resetoi mikserin (sammuttaa kaikki soivat „„net)
+	- Deinitialisoi SB:n hw-tasolla
+
+ÖÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ·
+º			      Sis„iset rutiinit 			       º
+ÓÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ½
+ÚÄÄ SB_IRQHandler ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+
+	- AutoPlay-moodissa kutsuu Gmd_Mixeri„
+

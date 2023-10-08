@@ -1,0 +1,19 @@
+TITLE DMA.INC - EMF Protected Mode Sound System - DMA Manager v1.0 31.08.1994
+;컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴�
+
+; DMA buffer info block structure:
+
+DBufAddress     EQU     00h     ; Dword
+DBufLength      EQU     04h     ; Dword
+DBufBlockAddr   EQU     08h     ; Dword
+DBufChannel     EQU     0Ch     ; Byte
+DBufAutoLoop    EQU     0Dh     ; Byte (0/1)
+DBufDirection   EQU     0Eh     ; Byte (0/1)
+;--------------------------------------
+DMAInfoLen      EQU     0Fh
+
+Global  DMA_AllocBuf:Near
+Global  DMA_FreeBuf:Near
+Global  DMA_Play:Near
+Global  DMA_Stop:Near
+Global  DMA_GetPosition:Near

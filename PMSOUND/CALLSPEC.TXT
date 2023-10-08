@@ -1,0 +1,193 @@
+* = CF set on error, eax-> 0$ terminated error message.
+
+Sd_Reset        EQU     00h*4           ; Reset the soundcard device
+
+        In: -
+        Out: *
+
+Sd_GetInfo      EQU     01h*4           ; Get offset to SD info block
+
+        In: -
+        out: eax -> info block, *
+
+Sd_AllocChan    EQU     02h*4           ; Allocate channels
+
+        In: -
+        out: eax - channel handle, *
+        
+Sd_RegMemSmpl   EQU     03h*4           ; Register a memory sample
+
+        In: esi -> sample
+            eax -> sample info block
+        Out: eax - sample handle, *
+
+Sd_ChunkLoad    EQU     04h*4           ; Request chunk load a sample
+
+        In: eax -> sample info block (may be altered)
+            edx -> GetChunk-function
+            esi -> chunk buffer
+            ecx -> chunk buffer length
+
+        Out: eax - sample handle, *
+
+        Invoked by: Ldr_Load, Snd_LoadSample
+        Invokes: ebx (Ldr_GetChunk)
+
+DD      SmplLen
+DD      SmplRepeatFrom
+DD      SmplRepeatTo
+DB      SmplFlags:      76543210
+                            ³³³³
+                            ³³³ÀÄÄ 0: No repeat, 1: Repeating
+                            ³ÀÁÄÄÄ Sample bits 00: 8 bits
+                            ³                  01: 12 bits
+                            ³                  10: 16 bits
+                            ÀÄÄÄÄÄ 0: Mono, 1: Stereo
+DB      Unused
+
+
+
+Sd_SetSample    EQU     05h*4           ; Set sample number and offset
+
+        In:  eax - channel
+             edx - sample handle
+             esi - offset
+
+        Out: *
+
+Sd_SetVolume    EQU     06h*4           ; Set the channel volume
+
+        In:  eax - channel
+             edx - volume [0..255]
+        Out: *
+
+Sd_SetBalance   EQU     07h*4           ; Set the left/right balance
+
+        In:  eax - channel
+             edx - balance: 0=left, 128=middle, 255=right
+        Out: *
+
+Sd_SetAcc       EQU     08h*4           ; Set sample speed accumulator
+
+        In:  eax - channel
+             edx - sample accumulator, hi word=integral, lo word=fractional,
+                   relative to the sample rate (Info+26d)
+        Out: *
+        
+Sd_Flush        EQU     09h*4           ; Execute new commands (if not already)
+
+        In: -
+        Out: *
+
+Sd_GetSample    EQU     15h*4           ; Get sample number and offset
+Sd_GetVolume    EQU     16h*4           ; Get the channel volume
+Sd_GetBalance   EQU     17h*4           ; Get the left/right balance
+Sd_GetAcc       EQU     18h*4           ; Get sample speed accumulato
+
+Tmr_Reset       EQU     20h*4           ; Reset the timer device
+
+        In: -
+        Out: *
+
+Tmr_GetInfo     EQU     21h*4           ; Get offset to timer info block
+
+        In: -
+        out: eax -> info block, *
+
+Tmr_ReqCall     EQU     23h*4           ; Request timer to call to address
+
+        In: eax - tickbytes before call
+            edi -> pointer to function
+        Out: *
+
+        The called function assumes that ds&es are _seldata and
+        gs is _selzero. The called function is not assumed to preserve
+        any of the registers.
+
+Tmr_DeInit      EQU     2Fh*4           ; Uninstall the timer driver
+
+        In: -
+        Out: *
+
+Mus_Reset       EQU     30h*4           ; Reset music player
+
+        In: -
+        Out: *
+
+
+Mus_GetInfo     EQU     31h*4           ; Get offset to player info block
+
+        In: -
+        Out: eax -> info block, *
+
+Mus_Start       EQU     32h*4
+
+        In: -
+        Out: *
+
+Mus_Stop        EQU     33h*4
+
+        In: -
+        Out: *
+
+Mus_Resume      EQU     34h*4
+
+        In: -
+        Out: *
+
+Mus_SetPos      EQU     35h*4
+
+        In: eax - new pos
+        Out: *
+
+Mus_GetPos      EQU     36h*4
+
+        In: -
+        Out: eax - pos (depends on music type), *
+             edx - wrapcount
+
+Ldr_Reset       EQU     40h*4           ; Reset the file loader
+
+        In: -
+        out: *
+
+Ldr_GetInfo     EQU     41h*4           ; Get offset to loader info block
+
+        In: -
+        Out: eax -> info block, *
+
+Ldr_Load        EQU     42h*4           ; Load the music file
+
+        In: eax -> ASCIIZ filename
+        Out: *
+
+Ldr_Unload      EQU     43h*4           ; Unload the music file
+
+        ?
+
+Ldr_GetChunk    EQU     48h*4           ; Called by SD to get sample Chunk
+
+        In: esi -> chunk buffer (preserved)
+            ecx - chunk buffer len (preserved)
+        Out: *
+
+Snd_Reset       EQU     50h*4           ; Reset sound effect player
+Snd_GetInfo     EQU     51h*4           ; Get offset to SND info block
+Snd_LoadSample  EQU     52h*4
+
+        In:  eax -> filename
+             ecx - sample length
+             ebx - sample flags
+        Out: eax - sample handle
+
+Snd_PlaySample  EQU     53h*4
+
+        In:  eax - sample handle
+             ecx - sample volume
+             edx - sample frequency
+             esi - sample start offset
+             ebp - sample balance
+
+
+
+
